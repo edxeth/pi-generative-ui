@@ -41,7 +41,7 @@ The LLM decides when to use widgets vs text based on the request. Explanatory/vi
 
 ## What's inside
 
-### The guidelines — stolen from Claude
+### The guidelines — extracted from Claude
 
 The design guidelines aren't hand-written. They're **extracted verbatim from claude.ai**.
 
