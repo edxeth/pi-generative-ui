@@ -53,11 +53,11 @@ Five modules, loaded on demand:
 
 | Module | Size | What it covers |
 |---|---|---|
-| `interactive` | 19K | Sliders, metric cards, live calculations |
-| `chart` | 22K | Chart.js setup, custom legends, number formatting |
-| `mockup` | 19K | UI component tokens, cards, forms, skeleton loading |
-| `art` | 17K | SVG illustration, Canvas animation, creative patterns |
-| `diagram` | 59K | Flowcharts, architecture diagrams, SVG arrow systems |
+| `interactive` | 19KB | Sliders, metric cards, live calculations |
+| `chart` | 22KB | Chart.js setup, custom legends, number formatting |
+| `mockup` | 19KB | UI component tokens, cards, forms, skeleton loading |
+| `art` | 17KB | SVG illustration, Canvas animation, creative patterns |
+| `diagram` | 59KB | Flowcharts, architecture diagrams, SVG arrow systems |
 
 ### Streaming architecture
 
