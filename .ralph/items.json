@@ -46,8 +46,8 @@
         "Open another widget, abort the active tool from pi, and verify the widget closes.",
         "Verify no orphan helper process remains after each resolution path."
       ],
-      "passes": false,
-      "regression_notes": ""
+      "passes": true,
+      "regression_notes": "2026-03-13: Fixed aborted streamed-widget cleanup so assistant aborts close any in-flight Linux window before execute, and verified lifecycle semantics on Xvfb DISPLAY=:103. Manual close in a headed interactive `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` session returned `Window closed by user.` with no remaining helper process; a separate headed Linux `pi --mode rpc` run aborted immediately after `tool_execution_start` returned `details.closedReason = \"Aborted.\"`, removed the native `rpc abort verify` window, and left no orphan helper."
     },
     {
       "category": "functional",

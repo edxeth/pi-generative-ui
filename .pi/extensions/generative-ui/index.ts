@@ -120,6 +120,32 @@ export default function (pi: ExtensionAPI) {
     return false;
   }
 
+  async function closeStreamingWindow(streamState: StreamingWidget | null) {
+    if (!streamState) return;
+    if (streamState.updateTimer) {
+      clearTimeout(streamState.updateTimer);
+      streamState.updateTimer = null;
+    }
+
+    if (streamState.window) {
+      try { streamState.window.close(); } catch {}
+      return;
+    }
+
+    if (streamState.opening) {
+      try {
+        const win = await streamState.opening;
+        try { win.close(); } catch {}
+      } catch {}
+    }
+  }
+
+  async function abandonStreamingWindow(streamState: StreamingWidget | null) {
+    if (!streamState) return;
+    if (streaming === streamState) streaming = null;
+    await closeStreamingWindow(streamState);
+  }
+
   async function ensureSupport() {
     const support = await backend.checkSupport();
     if (!support.ok) throw new Error(formatSupportError(backend.kind, support));
@@ -192,10 +218,19 @@ export default function (pi: ExtensionAPI) {
             });
 
             const win = await streamState.opening;
+            if (streaming !== streamState) {
+              try { win.close(); } catch {}
+              return;
+            }
+
             streamState.window = win;
             streamState.opening = null;
 
             win.on("ready", () => {
+              if (streaming !== streamState) {
+                try { win.close(); } catch {}
+                return;
+              }
               streamState.ready = true;
               flushStreamingContent(streamState);
             });
@@ -221,6 +256,13 @@ export default function (pi: ExtensionAPI) {
         flushStreamingContent(streaming);
       }
       return;
+    }
+  });
+
+  pi.on("message_end", async (event) => {
+    const message: any = event.message;
+    if (message?.role === "assistant" && message?.stopReason === "aborted") {
+      await abandonStreamingWindow(streaming);
     }
   });
 
