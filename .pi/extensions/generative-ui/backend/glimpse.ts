@@ -1,14 +1,25 @@
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import type { WidgetBackend } from "./types.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const GLIMPSE_PATH = join(__dirname, "../../../../node_modules/glimpseui/src/glimpse.mjs");
+const requireFromHere = createRequire(import.meta.url);
 
 let glimpseModule: { open: (html: string, options: Record<string, unknown>) => any } | null = null;
 
+function isMissingGlimpseDependency(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Cannot find module") && message.includes("glimpseui");
+}
+
+function resolveGlimpsePath(): string {
+  return requireFromHere.resolve("glimpseui/src/glimpse.mjs");
+}
+
 async function getGlimpse() {
-  if (!glimpseModule) glimpseModule = await import(GLIMPSE_PATH);
+  if (!glimpseModule) {
+    const glimpsePath = resolveGlimpsePath();
+    glimpseModule = await import(pathToFileURL(glimpsePath).href);
+  }
   return glimpseModule;
 }
 
@@ -31,8 +42,13 @@ export class GlimpseBackend implements WidgetBackend {
       return {
         ok: false as const,
         code: "BACKEND_START_FAILED" as const,
-        reason: error instanceof Error ? error.message : String(error),
-        fixes: ["Run npm install so the optional glimpseui dependency is available on macOS."],
+        reason: isMissingGlimpseDependency(error)
+          ? "The optional macOS dependency 'glimpseui' is not installed or could not be resolved from this package."
+          : (error instanceof Error ? error.message : String(error)),
+        fixes: [
+          "Run npm install on macOS so the optional glimpseui dependency is available.",
+          "If you installed from a packed tarball, confirm node_modules/glimpseui is present for this package.",
+        ],
       };
     }
   }

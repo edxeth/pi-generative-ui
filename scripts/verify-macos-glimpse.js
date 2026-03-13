@@ -5,7 +5,47 @@ const { StringDecoder } = require("node:string_decoder");
 const repoRoot = path.resolve(__dirname, "..");
 const piBin = process.env.PI_VERIFY_PI_BIN || "pi";
 const scenarioTimeoutMs = Number(process.env.PI_VERIFY_TIMEOUT_MS || 180000);
+const windowTimeoutMs = Number(process.env.PI_VERIFY_WINDOW_TIMEOUT_MS || 20000);
+const windowPollMs = Number(process.env.PI_VERIFY_WINDOW_POLL_MS || 250);
+const commandTimeoutMs = Number(process.env.PI_VERIFY_COMMAND_TIMEOUT_MS || 15000);
 const forwardedArgs = process.argv.slice(2);
+
+const LIST_WINDOWS_JXA = String.raw`(() => {
+  const systemEvents = Application('System Events');
+  const titles = [];
+  for (const process of systemEvents.processes.whose({ visible: true })()) {
+    for (const window of process.windows()) {
+      try {
+        const title = String(window.name() || '');
+        if (title) titles.push(title);
+      } catch (error) {}
+    }
+  }
+  return JSON.stringify(titles);
+})()`;
+
+const CLOSE_WINDOW_JXA = String.raw`(() => {
+  ObjC.import('stdlib');
+  const target = $.getenv('PI_TARGET_TITLE').js;
+  const systemEvents = Application('System Events');
+
+  for (const process of systemEvents.processes.whose({ visible: true })()) {
+    for (const window of process.windows()) {
+      try {
+        if (String(window.name() || '') !== target) continue;
+        const closeAction = window.actions.byName('AXClose');
+        closeAction.perform();
+        return 'closed';
+      } catch (error) {}
+    }
+  }
+
+  throw new Error('Window not found or not closable: ' + target);
+})()`;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function attachJsonlReader(stream, onLine) {
   const decoder = new StringDecoder("utf8");
@@ -73,42 +113,203 @@ function createPrompt(widgetTitle, widgetCode) {
   ].join(" ");
 }
 
-const scenarios = [
-  {
+function formatCommand(command, args) {
+  return [command, ...args].join(" ");
+}
+
+function runCommand(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? commandTimeoutMs;
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? repoRoot;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timeout = null;
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      reject(error);
+    });
+
+    timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {}
+      reject(new Error(`Timed out after ${timeoutMs}ms: ${formatCommand(command, args)}`));
+    }, timeoutMs);
+
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      resolve({ code, signal, stdout, stderr });
+    });
+  });
+}
+
+async function requireSuccessfulCommand(command, args, options = {}) {
+  const result = await runCommand(command, args, options);
+  if (result.code !== 0) {
+    const details = (result.stderr || result.stdout || "").trim();
+    throw new Error(`${formatCommand(command, args)} failed.${details ? `\n${details}` : ""}`);
+  }
+  return result;
+}
+
+async function listMacWindowTitles() {
+  const result = await requireSuccessfulCommand("osascript", ["-l", "JavaScript", "-e", LIST_WINDOWS_JXA]);
+  const output = result.stdout.trim();
+  if (!output) return [];
+
+  try {
+    const titles = JSON.parse(output);
+    return Array.isArray(titles) ? titles.filter((title) => typeof title === "string") : [];
+  } catch (error) {
+    throw new Error(`Failed to parse macOS window titles: ${output}`);
+  }
+}
+
+async function waitForWindowTitle(title, present = true, timeoutMs = windowTimeoutMs) {
+  const startedAt = Date.now();
+  let lastTitles = [];
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastTitles = await listMacWindowTitles();
+    const hasTitle = lastTitles.includes(title);
+    if (hasTitle === present) return lastTitles;
+    await sleep(windowPollMs);
+  }
+
+  throw new Error(
+    present
+      ? `Timed out waiting for native macOS window ${JSON.stringify(title)}. Visible titles: ${JSON.stringify(lastTitles)}`
+      : `Timed out waiting for native macOS window ${JSON.stringify(title)} to disappear. Visible titles: ${JSON.stringify(lastTitles)}`
+  );
+}
+
+async function closeWindowByTitle(title) {
+  await requireSuccessfulCommand(
+    "osascript",
+    ["-l", "JavaScript", "-e", CLOSE_WINDOW_JXA],
+    {
+      env: { ...process.env, PI_TARGET_TITLE: title },
+    }
+  );
+}
+
+async function closeWindowIfPresent(title) {
+  const titles = await listMacWindowTitles();
+  if (!titles.includes(title)) return false;
+  await closeWindowByTitle(title);
+  await waitForWindowTitle(title, false);
+  return true;
+}
+
+function logScenarioStep(scenarioName, step) {
+  process.stdout.write(`[${scenarioName}] ${step}\n`);
+}
+
+function createMessageRoundtripScenario() {
+  const token = `roundtrip-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const widgetTitle = "macos_glimpse_roundtrip";
+  const windowTitle = widgetTitle.replace(/_/g, " ");
+  const payload = {
+    ok: true,
+    backend: "mac-glimpse",
+    scenario: "message-roundtrip",
+    token,
+  };
+
+  return {
     name: "message roundtrip",
+    widgetTitle,
+    windowTitle,
     prompt: createPrompt(
-      "macos_glimpse_roundtrip",
-      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}button{padding:10px 14px;border-radius:10px;border:0;background:#4f46e5;color:#fff;font-weight:600}</style><main><button id="send">macOS Glimpse roundtrip</button></main><script>setTimeout(()=>window.glimpse.send({ok:true,backend:'mac-glimpse',title:document.title||'macos_glimpse_roundtrip'}),300);</script>`
+      widgetTitle,
+      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}button{padding:10px 14px;border-radius:10px;border:0;background:#4f46e5;color:#fff;font-weight:600}</style><main><button id="send">macOS Glimpse roundtrip</button></main><script>setTimeout(()=>window.glimpse.send(${JSON.stringify(payload)}),1200);</script>`
     ),
+    async onPrompt() {
+      logScenarioStep(this.name, `waiting for native window ${JSON.stringify(windowTitle)}`);
+      await waitForWindowTitle(windowTitle, true);
+      logScenarioStep(this.name, `observed native window ${JSON.stringify(windowTitle)}`);
+    },
     validate(toolResult) {
       const details = toolResult?.result?.details ?? {};
-      if (details?.messageData?.ok !== true) {
-        throw new Error(`Expected messageData.ok === true, got ${JSON.stringify(details?.messageData)}`);
+      const messageData = details?.messageData;
+      if (!messageData || typeof messageData !== "object") {
+        throw new Error(`Expected messageData object, got ${JSON.stringify(messageData)}`);
       }
-      if (details?.messageData?.backend !== "mac-glimpse") {
-        throw new Error(`Expected backend marker 'mac-glimpse', got ${JSON.stringify(details?.messageData)}`);
+      if (messageData.ok !== true || messageData.backend !== payload.backend || messageData.scenario !== payload.scenario || messageData.token !== payload.token) {
+        throw new Error(`Unexpected messageData payload: ${JSON.stringify(messageData)}`);
       }
     },
-  },
-  {
-    name: "close semantics",
+    async cleanup() {
+      logScenarioStep(this.name, `closing native window ${JSON.stringify(windowTitle)} after roundtrip`);
+      await closeWindowIfPresent(windowTitle);
+    },
+  };
+}
+
+function createManualCloseScenario() {
+  const widgetTitle = "macos_glimpse_manual_close";
+  const windowTitle = widgetTitle.replace(/_/g, " ");
+
+  return {
+    name: "manual close semantics",
+    widgetTitle,
+    windowTitle,
     prompt: createPrompt(
-      "macos_glimpse_close",
-      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}</style><main>macOS Glimpse close check</main><script>setTimeout(()=>window.glimpse.close(),300);</script>`
+      widgetTitle,
+      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}</style><main>macOS Glimpse manual close check</main>`
     ),
+    async onPrompt() {
+      logScenarioStep(this.name, `waiting for native window ${JSON.stringify(windowTitle)}`);
+      await waitForWindowTitle(windowTitle, true);
+      logScenarioStep(this.name, `closing native window ${JSON.stringify(windowTitle)} via System Events`);
+      await closeWindowByTitle(windowTitle);
+      await waitForWindowTitle(windowTitle, false);
+    },
     validate(toolResult) {
       const details = toolResult?.result?.details ?? {};
       if (details?.closedReason !== "Window closed by user.") {
         throw new Error(`Expected closedReason to be 'Window closed by user.', got ${JSON.stringify(details?.closedReason)}`);
       }
     },
-  },
-];
+  };
+}
 
-async function main() {
+async function assertPrerequisites() {
   if (process.platform !== "darwin") {
     throw new Error("scripts/verify-macos-glimpse.js must be run in a real macOS environment.");
   }
+
+  await requireSuccessfulCommand(piBin, ["--version"]);
+  await requireSuccessfulCommand("osascript", ["-l", "JavaScript", "-e", "'ok'"]);
+}
+
+async function main() {
+  await assertPrerequisites();
 
   const args = [
     "--mode",
@@ -190,11 +391,14 @@ async function main() {
   };
 
   try {
-    for (const scenario of scenarios) {
+    for (const scenario of [createMessageRoundtripScenario(), createManualCloseScenario()]) {
+      logScenarioStep(scenario.name, "starting");
       const scenarioPromise = onceScenario(state, scenario);
       await sendCommand({ type: "prompt", message: scenario.prompt });
+      if (scenario.onPrompt) await scenario.onPrompt();
       await scenarioPromise;
-      process.stdout.write(`✓ ${scenario.name}\n`);
+      if (scenario.cleanup) await scenario.cleanup();
+      logScenarioStep(scenario.name, "passed");
     }
   } finally {
     try {

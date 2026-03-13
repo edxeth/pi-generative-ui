@@ -53,3 +53,10 @@
 - Files changed: `scripts/verify-macos-glimpse.js`, `.ralph/items.json`, `.ralph/progress.md`.
 - Verification: `node --check scripts/verify-macos-glimpse.js` ✅; `npm install` ✅; `npm pack --dry-run` ✅; `node scripts/verify-macos-glimpse.js` ❌ as expected on Linux (`must be run in a real macOS environment`).
 - Next iteration notes: run `node scripts/verify-macos-glimpse.js` on macOS with pi and model credentials configured, confirm the headed Glimpse windows visibly open during both scenarios, then update item 7 only if the real macOS run passes.
+
+## 2026-03-13 - Item 7: macOS regression harness hardening
+- Item worked on: The macOS Glimpse backend path remains intact and regression verification is more deterministic, but still unverified on a real macOS host.
+- Key decisions: replaced the hard-coded Glimpse module path with lazy package resolution, and upgraded the macOS harness to wait for a titled native window, verify an exact roundtrip payload, and close the manual-close scenario through macOS System Events instead of page script shortcuts.
+- Files changed: `.pi/extensions/generative-ui/backend/glimpse.ts`, `scripts/verify-macos-glimpse.js`, `.ralph/items.json`, `.ralph/progress.md`.
+- Verification: `npm install` ✅; `npm pack --dry-run` ✅; `node --check scripts/verify-macos-glimpse.js` ✅; `npx --yes tsx -e "import { GlimpseBackend } from './.pi/extensions/generative-ui/backend/glimpse.ts'; const backend = new GlimpseBackend(); backend.checkSupport().then((result) => console.log(JSON.stringify(result, null, 2)));"` ✅ (`UNSUPPORTED_PLATFORM` on Linux without crashing on optional Glimpse resolution); `node scripts/verify-macos-glimpse.js` ❌ as expected on Linux (`must be run in a real macOS environment`).
+- Next iteration notes: run `node scripts/verify-macos-glimpse.js` on a real macOS machine with pi configured, grant Automation/Accessibility access if System Events prompts for it, and only mark item 7 passing if the harness observes the native Glimpse windows and both scenarios succeed there.

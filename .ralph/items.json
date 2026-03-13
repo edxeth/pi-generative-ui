@@ -80,7 +80,7 @@
         "Verify the widget opens, can send a page message, and still follows the existing macOS lifecycle semantics."
       ],
       "passes": false,
-      "regression_notes": "2026-03-13: Added scripts/verify-macos-glimpse.js as a deterministic pi RPC regression harness for a real macOS run, but this WSL2/Linux iteration could only verify script syntax, package gates, and the explicit non-macOS guard. Item remains blocked until the harness is executed in an actual macOS environment with the Glimpse backend."
+      "regression_notes": "2026-03-13: Hardened the macOS regression prep by switching Glimpse resolution to lazy module lookup, expanding scripts/verify-macos-glimpse.js to assert native window visibility and automate manual-close semantics via macOS System Events, and re-verifying package gates plus the explicit non-macOS guard on Linux. Item remains blocked until that harness is run in a real macOS environment with Glimpse and Accessibility access."
     }
   ]
 }
