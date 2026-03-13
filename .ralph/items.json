@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "category": "functional",
+      "description": "Linux package installation succeeds on WSL2 Ubuntu 24 with WSLg and required GTK/WebKitGTK development packages, without `EBADPLATFORM`, and produces an executable Linux helper binary.",
+      "steps": [
+        "From WSL2 Ubuntu 24 with WSLg and required build packages installed, perform a clean install of the package from the repo or git source.",
+        "Verify install exits 0 and does not print `EBADPLATFORM`.",
+        "Verify the Linux helper binary exists at the documented package-local path and is executable."
+      ],
+      "passes": true,
+      "regression_notes": "2026-03-13: Clean Linux npm install succeeded from a no-node_modules state without EBADPLATFORM. postinstall built .pi/extensions/generative-ui/native/linux/bin/pi-generative-ui-linux-helper and helper --version/self-test reported gtk3+webkit2gtk-4.1 on this WSL environment."
+    },
+    {
+      "category": "functional",
+      "description": "A headed interactive pi session can load the extension on Linux, open a native widget window, and receive a page message through `window.glimpse.send(...)`.",
+      "steps": [
+        "Launch a headed interactive `pi` session with this package loaded from the local repo path.",
+        "Submit a prompt that triggers `visualize_read_me` and `show_widget`.",
+        "Verify a native Linux widget window opens and remains visible while the pi session stays active.",
+        "Interact with the widget so it sends a JSON payload through `window.glimpse.send(...)`.",
+        "Verify the tool result shown in pi includes the returned payload."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "Streamed widget rendering updates appear incrementally in the headed pi session and finalize by executing deferred scripts once.",
+      "steps": [
+        "In the headed interactive `pi` session, submit a visual prompt that causes a streamed `show_widget` call with visible partial updates.",
+        "Verify the widget window appears before the tool call is fully complete.",
+        "Verify at least one intermediate DOM update is visible before final completion.",
+        "Verify the finalized widget executes its deferred scripts after the final payload arrives."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "Widget lifecycle resolution on Linux preserves manual close and abort behavior.",
+      "steps": [
+        "Open a widget that does not immediately send a page message.",
+        "Manually close the widget window and verify pi reports the expected close result.",
+        "Open another widget, abort the active tool from pi, and verify the widget closes.",
+        "Verify no orphan helper process remains after each resolution path."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "Linux diagnostics clearly distinguish missing display, missing helper binary, and missing runtime prerequisites.",
+      "steps": [
+        "Exercise the extension with `DISPLAY` and `WAYLAND_DISPLAY` unavailable and verify the reported error names the missing GUI display.",
+        "Exercise the extension with the Linux helper binary missing or non-executable and verify the reported error names that specific condition.",
+        "Exercise the extension in a missing runtime/dependency scenario and verify the reported error includes actionable remediation guidance."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "Package metadata and documentation describe Linux/WSLg support, installation requirements, and verification workflow without breaking existing pi package behavior.",
+      "steps": [
+        "Review package metadata and README after the change.",
+        "Verify the documented install path matches how pi packages are loaded and installed.",
+        "Verify Linux prerequisites and the headed interactive pi verification workflow are documented for WSL2 + WSLg users."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "The macOS Glimpse backend path remains intact and regression-verified in an appropriate macOS environment.",
+      "steps": [
+        "In a macOS environment with the required toolchain, install the package and load it in pi.",
+        "Trigger a visual prompt that opens a widget through the Glimpse backend.",
+        "Verify the widget opens, can send a page message, and still follows the existing macOS lifecycle semantics."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    }
+  ]
+}
