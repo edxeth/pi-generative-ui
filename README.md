@@ -2,7 +2,7 @@
 
 Claude.ai's generative UI - reverse-engineered, rebuilt for [pi](https://github.com/badlogic/pi).
 
-Ask pi to "show me how compound interest works" and get a live interactive widget - sliders, charts, animations - rendered in a native macOS window. Not a screenshot. Not a code block. A real HTML application with JavaScript, streaming live as the LLM generates it.
+Ask pi to "show me how compound interest works" and get a live interactive widget - sliders, charts, animations - rendered in a native macOS or Linux window. Not a screenshot. Not a code block. A real HTML application with JavaScript, streaming live as the LLM generates it.
 
 <img src="media/dashboard.gif" width="32%"> <img src="media/simulator.gif" width="32%"> <img src="media/diagram.gif" width="32%">
 
@@ -14,11 +14,11 @@ This extension replicates that system for pi:
 
 1. **LLM calls `visualize_read_me`** - loads design guidelines (lazy, only the relevant modules)
 2. **LLM calls `show_widget`** - generates an HTML fragment as a tool call parameter
-3. **Extension intercepts the stream** - opens a native macOS window via [Glimpse](https://github.com/hazat/glimpse) and feeds partial HTML as tokens arrive
+3. **Extension intercepts the stream** - opens a native platform window (Glimpse on macOS, the bundled Linux helper on Linux) and feeds partial HTML as tokens arrive
 4. **[morphdom](https://github.com/patrick-steele-idem/morphdom) diffs the DOM** - new elements fade in smoothly, unchanged elements stay untouched
 5. **Scripts execute on completion** - Chart.js, D3, Three.js, anything from CDN
 
-The widget window has full browser capabilities (WKWebView) and a bidirectional bridge - `window.glimpse.send(data)` sends data back to the agent.
+The widget window has full browser capabilities and a bidirectional bridge - `window.glimpse.send(data)` sends data back to the agent.
 
 ## Install
 
@@ -26,7 +26,43 @@ The widget window has full browser capabilities (WKWebView) and a bidirectional 
 pi install git:github.com/Michaelliv/pi-generative-ui
 ```
 
-> macOS only. Requires Swift toolchain (ships with Xcode or Xcode Command Line Tools).
+Supported paths:
+
+- **macOS** - uses [Glimpse](https://github.com/hazat/glimpse) and the optional `glimpseui` dependency
+- **Linux / WSL2 Ubuntu 24** - builds a package-local helper at install time and opens widgets in a native GTK/WebKit window
+
+### Linux / WSL2 prerequisites
+
+The supported Linux acceptance path is **WSL2 Ubuntu 24 with WSLg enabled**.
+
+Install a compiler toolchain plus one supported GTK/WebKit runtime set:
+
+```bash
+sudo apt install -y build-essential
+sudo apt install -y libgtk-3-0 libwebkit2gtk-4.1-0
+```
+
+Then install the package and verify the helper was built:
+
+```bash
+npm install
+npm pack --dry-run
+ls -l .pi/extensions/generative-ui/native/linux/bin
+```
+
+### Headed verification workflow
+
+Use a real interactive pi session - not print mode and not JSON mode:
+
+```bash
+pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui
+```
+
+Ask pi for a visual explanation so it calls `visualize_read_me` and `show_widget`, then confirm:
+
+1. a native widget window opens while pi stays interactive
+2. the widget can call `window.glimpse.send(...)`
+3. the returned payload appears back in pi's tool result
 
 ## Usage
 
@@ -75,28 +111,26 @@ Key details:
 - **morphdom DOM diffing** - only changed nodes update; new nodes get a 0.3s fade-in animation
 - **pi-ai's `parseStreamingJson`** - no need for a partial JSON parser; pi already provides parsed `arguments` on every delta
 - **150ms debounce** - batches rapid token updates for smooth visual rendering
-- **Dark mode by default** - `#1a1a1a` background, designed for macOS WKWebView
+- **Dark mode by default** - `#1a1a1a` background, designed for the native macOS and Linux webview backends
 
-### Glimpse
+### Native backends
 
-[Glimpse](https://github.com/hazat/glimpse) is a native macOS micro-UI library. It opens a WKWebView window in under 50ms via a tiny Swift binary. No Electron, no browser tab, no runtime dependencies beyond the system WebKit.
+- **macOS:** [Glimpse](https://github.com/hazat/glimpse), a tiny Swift/WKWebView bridge
+- **Linux:** a bundled helper binary that speaks JSONL over stdin/stdout and hosts the widget in GTK/WebKit
 
-The Swift source compiles automatically on `npm install` via `postinstall`.
+Both backends expose the same page bridge: `window.glimpse.send(data)` and `window.glimpse.close()`.
 
 ## Project structure
 
 ```
 pi-generative-ui/
 ├── .pi/extensions/generative-ui/
-│   ├── index.ts              # Extension: tools, streaming, Glimpse integration
+│   ├── backend/              # Platform selection + macOS/Linux adapters
+│   ├── index.ts              # Extension: tools, streaming, backend integration
 │   ├── guidelines.ts         # 72K of verbatim claude.ai design guidelines
-│   └── claude-guidelines/    # Raw extracted markdown (reference)
-│       ├── art.md
-│       ├── chart.md
-│       ├── diagram.md
-│       ├── interactive.md
-│       ├── mockup.md
-│       └── sections/         # Deduplicated sections
+│   ├── claude-guidelines/    # Raw extracted markdown (reference)
+│   └── native/linux/src/     # Linux helper source
+├── scripts/postinstall.js    # Builds the Linux helper on Linux installs
 └── package.json              # pi-package manifest
 ```
 

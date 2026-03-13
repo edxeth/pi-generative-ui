@@ -68,8 +68,8 @@
         "Verify the documented install path matches how pi packages are loaded and installed.",
         "Verify Linux prerequisites and the headed interactive pi verification workflow are documented for WSL2 + WSLg users."
       ],
-      "passes": false,
-      "regression_notes": ""
+      "passes": true,
+      "regression_notes": "2026-03-13: Updated package metadata and README for Linux/WSLg support, documented `pi install git:github.com/Michaelliv/pi-generative-ui` plus headed local validation via `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui`, and narrowed published package contents with a `files` whitelist verified by npm pack --dry-run."
     },
     {
       "category": "functional",

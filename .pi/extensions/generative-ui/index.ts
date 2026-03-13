@@ -2,16 +2,11 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getGuidelines, AVAILABLE_MODULES } from "./guidelines.js";
-
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const GLIMPSE_PATH = join(__dirname, "../../../node_modules/glimpseui/src/glimpse.mjs");
+import { getWidgetBackend, formatSupportError, type WidgetWindow } from "./backend/index.js";
 
 // Shell HTML with a root container — used for streaming.
-// Content is injected via win.send() JS eval, not setHTML(), to avoid full-page flashes.
+// Content is injected via win.send() JS eval, not a full reload, to avoid flashes.
 function shellHTML(): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -56,7 +51,7 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 </body></html>`;
 }
 
-// Wrap HTML fragment into a full document for Glimpse (non-streaming fallback)
+// Wrap HTML fragment into a full document for non-streaming fallback.
 function wrapHTML(code: string, isSVG = false): string {
   if (isSVG) {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
@@ -69,104 +64,127 @@ ${code}</body></html>`;
 </head><body>${code}</body></html>`;
 }
 
-// Escape a string for safe injection into a JS string literal
+// Escape a string for safe injection into a JS string literal.
 function escapeJS(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/<\/script>/gi, '<\\/script>');
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/<\/script>/gi, "<\\/script>");
 }
 
 export default function (pi: ExtensionAPI) {
+  const backend = getWidgetBackend();
   let hasSeenReadMe = false;
-  let activeWindows: any[] = [];
-  let glimpseModule: any = null;
+  let activeWindows: WidgetWindow[] = [];
 
-  // Lazy-load glimpse module
-  async function getGlimpse() {
-    if (!glimpseModule) {
-      glimpseModule = await import(GLIMPSE_PATH);
-    }
-    return glimpseModule;
-  }
-
-  // ── Streaming state ─────────────────────────────────────────────────────
-
-  // Tracks in-flight show_widget tool calls being streamed
   interface StreamingWidget {
     contentIndex: number;
-    window: any | null;
+    window: WidgetWindow | null;
     lastHTML: string;
-    updateTimer: any;
+    updateTimer: NodeJS.Timeout | null;
     ready: boolean;
+    opening: Promise<WidgetWindow> | null;
+    title: string;
+    width: number;
+    height: number;
+    floating: boolean;
   }
 
   let streaming: StreamingWidget | null = null;
 
-  // ── message_update: intercept streaming tool calls ────────────────────
+  async function ensureSupport() {
+    const support = await backend.checkSupport();
+    if (!support.ok) throw new Error(formatSupportError(backend.kind, support));
+  }
+
+  async function openWidgetWindow(html: string, options: { title: string; width: number; height: number; floating?: boolean }) {
+    await ensureSupport();
+    const win = await backend.open(html, options);
+    activeWindows.push(win);
+    const cleanup = () => {
+      activeWindows = activeWindows.filter((window) => window !== win);
+    };
+    win.on("closed", cleanup);
+    win.on("error", cleanup);
+    return win;
+  }
 
   pi.on("message_update", async (event) => {
     const raw: any = event.assistantMessageEvent;
     if (!raw) return;
 
-    // Tool call starts streaming
     if (raw.type === "toolcall_start") {
       const partial: any = raw.partial;
       const block = partial?.content?.[raw.contentIndex];
       if (block?.type === "toolCall" && block?.name === "show_widget") {
+        const args = block.arguments ?? {};
         streaming = {
           contentIndex: raw.contentIndex,
           window: null,
           lastHTML: "",
           updateTimer: null,
           ready: false,
+          opening: null,
+          title: (args.title ?? "Widget").replace(/_/g, " "),
+          width: args.width ?? 800,
+          height: args.height ?? 600,
+          floating: args.floating ?? false,
         };
       }
       return;
     }
 
-    // Tool call input JSON delta — arguments already parsed by pi-ai
     if (raw.type === "toolcall_delta" && streaming && raw.contentIndex === streaming.contentIndex) {
       const partial: any = raw.partial;
       const block = partial?.content?.[raw.contentIndex];
-      const html = block?.arguments?.widget_code;
+      const args = block?.arguments ?? {};
+      const html = args.widget_code;
       if (!html || html.length < 20 || html === streaming.lastHTML) return;
 
       streaming.lastHTML = html;
+      streaming.title = (args.title ?? streaming.title ?? "Widget").replace(/_/g, " ");
+      streaming.width = args.width ?? streaming.width;
+      streaming.height = args.height ?? streaming.height;
+      streaming.floating = args.floating ?? streaming.floating;
 
-      // Debounce updates to ~150ms for smooth rendering
       if (streaming.updateTimer) return;
       streaming.updateTimer = setTimeout(async () => {
         if (!streaming) return;
         streaming.updateTimer = null;
 
         try {
-          if (!streaming.window) {
-            // Open window with empty shell — content will be injected via JS eval
-            const args = block?.arguments ?? {};
-            const title = (args.title ?? "Widget").replace(/_/g, " ");
-            const width = args.width ?? 800;
-            const height = args.height ?? 600;
-
-            const { open } = await getGlimpse();
-            streaming.window = open(shellHTML(), { width, height, title });
-            activeWindows.push(streaming.window);
-
-            streaming.window.on("ready", () => {
-              if (!streaming) return;
-              streaming.ready = true;
-              // Inject the content we've accumulated so far
-              const escaped = escapeJS(streaming.lastHTML);
-              streaming.window.send(`window._setContent('${escaped}')`);
+          if (!streaming.window && !streaming.opening) {
+            streaming.opening = openWidgetWindow(shellHTML(), {
+              title: streaming.title,
+              width: streaming.width,
+              height: streaming.height,
+              floating: streaming.floating,
             });
-          } else if (streaming.ready) {
-            // Update content via JS — no full page replace
+
+            const win = await streaming.opening;
+            if (!streaming) return;
+            streaming.window = win;
+            streaming.opening = null;
+
+            win.on("ready", () => {
+              if (!streaming || streaming.window !== win) return;
+              streaming.ready = true;
+              const escaped = escapeJS(streaming.lastHTML);
+              win.send(`window._setContent('${escaped}')`);
+            });
+          } else if (streaming.window && streaming.ready) {
             const escaped = escapeJS(streaming.lastHTML);
             streaming.window.send(`window._setContent('${escaped}')`);
           }
-        } catch {}
+        } catch {
+          if (streaming) streaming.opening = null;
+        }
       }, 150);
       return;
     }
 
-    // Tool call complete — final update with complete HTML + execute scripts
     if (raw.type === "toolcall_end" && streaming && raw.contentIndex === streaming.contentIndex) {
       if (streaming.updateTimer) {
         clearTimeout(streaming.updateTimer);
@@ -178,12 +196,9 @@ export default function (pi: ExtensionAPI) {
         const escaped = escapeJS(toolCall.arguments.widget_code);
         streaming.window.send(`window._setContent('${escaped}'); window._runScripts();`);
       }
-      // Don't clear streaming — execute() will pick up the window
       return;
     }
   });
-
-  // ── read_me tool ──────────────────────────────────────────────────────────
 
   pi.registerTool({
     name: "visualize_read_me",
@@ -227,22 +242,20 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── show_widget tool ──────────────────────────────────────────────────────
-
   pi.registerTool({
     name: "show_widget",
     label: "Show Widget",
     description:
-      "Show visual content — SVG graphics, diagrams, charts, or interactive HTML widgets — in a native macOS window. " +
+      "Show visual content — SVG graphics, diagrams, charts, or interactive HTML widgets — in a native platform window. " +
       "Use for flowcharts, dashboards, forms, calculators, data tables, games, illustrations, or any visual content. " +
-      "The HTML is rendered in a native WKWebView with full CSS/JS support including Canvas and CDN libraries. " +
+      "The HTML is rendered in a native webview window with full CSS/JS support including Canvas and CDN libraries. " +
       "The page gets a window.glimpse.send(data) bridge to send JSON data back to the agent. " +
       "IMPORTANT: Call visualize_read_me once before your first show_widget call.",
-    promptSnippet: "Render interactive HTML/SVG widgets in a native macOS window (WKWebView). Supports full CSS, JS, Canvas, Chart.js.",
+    promptSnippet: "Render interactive HTML/SVG widgets in a native platform window. Supports full CSS, JS, Canvas, Chart.js.",
     promptGuidelines: [
       "Use show_widget when the user asks for visual content: charts, diagrams, interactive explainers, UI mockups, art.",
       "Always call visualize_read_me first to load design guidelines, then set i_have_seen_read_me: true.",
-      "The widget opens in a native macOS window — it has full browser capabilities (Canvas, JS, CDN libraries).",
+      "The widget opens in a native platform window with full browser capabilities (Canvas, JS, CDN libraries).",
       "Structure HTML as fragments: no DOCTYPE/<html>/<head>/<body>. Style first, then HTML, then scripts.",
       "The page has window.glimpse.send(data) to send data back. Use it for user choices and interactions.",
       "Keep widgets focused and appropriately sized. Default is 800x600 but adjust to fit content.",
@@ -272,43 +285,47 @@ export default function (pi: ExtensionAPI) {
         throw new Error("You must call visualize_read_me before show_widget. Set i_have_seen_read_me: true after doing so.");
       }
 
+      hasSeenReadMe = true;
       const code = params.widget_code;
       const isSVG = code.trimStart().startsWith("<svg");
       const title = params.title.replace(/_/g, " ");
       const width = params.width ?? 800;
       const height = params.height ?? 600;
-
-      // Check if we already have a streaming window from message_update
-      let win: any = null;
+      let win: WidgetWindow | null = null;
 
       if (streaming?.window) {
         win = streaming.window;
-        // Send final complete HTML + run scripts via JS eval (no full page replace)
         if (streaming.ready) {
           const escaped = escapeJS(code);
           win.send(`window._setContent('${escaped}'); window._runScripts();`);
         }
         streaming = null;
       } else {
-        // No streaming window — open fresh (fallback for non-streaming providers)
-        const { open } = await getGlimpse();
-        win = open(wrapHTML(code, isSVG), {
+        win = await openWidgetWindow(wrapHTML(code, isSVG), {
           width,
           height,
           title,
           floating: params.floating ?? false,
         });
-        activeWindows.push(win);
       }
 
-      return new Promise<any>((resolve) => {
+      return new Promise<any>((resolve, reject) => {
+        if (!win) {
+          reject(new Error("Failed to open widget window."));
+          return;
+        }
+
         let messageData: any = null;
         let resolved = false;
+        const timeout = setTimeout(() => {
+          finish("Widget still open (timed out waiting for interaction).");
+        }, 120_000);
 
         const finish = (reason: string) => {
           if (resolved) return;
           resolved = true;
-          activeWindows = activeWindows.filter((w) => w !== win);
+          clearTimeout(timeout);
+          activeWindows = activeWindows.filter((window) => window !== win);
           resolve({
             content: [
               {
@@ -329,7 +346,7 @@ export default function (pi: ExtensionAPI) {
           });
         };
 
-        win.on("message", (data: any) => {
+        win.on("message", (data: unknown) => {
           messageData = data;
           finish("User sent data from widget.");
         });
@@ -338,21 +355,16 @@ export default function (pi: ExtensionAPI) {
           finish("Window closed by user.");
         });
 
-        win.on("error", (err: Error) => {
-          finish(`Error: ${err.message}`);
+        win.on("error", (err: unknown) => {
+          reject(err instanceof Error ? err : new Error(String(err)));
         });
 
         if (signal) {
           signal.addEventListener("abort", () => {
-            try { win.close(); } catch {}
+            try { win?.close(); } catch {}
             finish("Aborted.");
           }, { once: true });
         }
-
-        // Auto-resolve after 120s if no interaction
-        setTimeout(() => {
-          finish("Widget still open (timed out waiting for interaction).");
-        }, 120_000);
       });
     },
 
@@ -376,19 +388,12 @@ export default function (pi: ExtensionAPI) {
       text += theme.fg("dim", ` ${details.width ?? 800}×${details.height ?? 600}`);
       if (details.isSVG) text += theme.fg("dim", " (SVG)");
 
-      if (details.closedReason) {
-        text += "\n" + theme.fg("muted", `  ${details.closedReason}`);
-      }
-
-      if (expanded && details.messageData) {
-        text += "\n" + theme.fg("dim", `  Data: ${JSON.stringify(details.messageData, null, 2)}`);
-      }
+      if (details.closedReason) text += "\n" + theme.fg("muted", `  ${details.closedReason}`);
+      if (expanded && details.messageData) text += "\n" + theme.fg("dim", `  Data: ${JSON.stringify(details.messageData, null, 2)}`);
 
       return new Text(text, 0, 0);
     },
   });
-
-  // ── cleanup on shutdown ───────────────────────────────────────────────────
 
   pi.on("session_shutdown", async () => {
     if (streaming?.updateTimer) clearTimeout(streaming.updateTimer);

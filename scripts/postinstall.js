@@ -76,6 +76,7 @@ function ensureLinuxHelper() {
     "-Wextra",
     linuxSourcePath,
     "-ldl",
+    "-pthread",
     "-o",
     linuxHelperPath,
   ]);
