@@ -4,15 +4,21 @@ import { LinuxWebviewBackend } from "./linux.js";
 
 let backend: WidgetBackend | null = null;
 
+function getRuntimePlatform() {
+  return process.env.PI_GENERATIVE_UI_TEST_PLATFORM || process.platform;
+}
+
 export function getWidgetBackend(): WidgetBackend {
   if (backend) return backend;
 
-  if (process.platform === "darwin") {
+  const platform = getRuntimePlatform();
+
+  if (platform === "darwin") {
     backend = new GlimpseBackend();
     return backend;
   }
 
-  if (process.platform === "linux") {
+  if (platform === "linux") {
     backend = new LinuxWebviewBackend();
     return backend;
   }
@@ -23,11 +29,11 @@ export function getWidgetBackend(): WidgetBackend {
       return {
         ok: false as const,
         code: "UNSUPPORTED_PLATFORM" as const,
-        reason: `Platform ${process.platform} is not supported by pi-generative-ui.`,
+        reason: `Platform ${platform} is not supported by pi-generative-ui.`,
       };
     },
     async open() {
-      throw new Error(`Unsupported platform: ${process.platform}`);
+      throw new Error(`Unsupported platform: ${platform}`);
     },
   };
   return backend;

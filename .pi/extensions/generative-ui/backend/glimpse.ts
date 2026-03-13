@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { WidgetBackend } from "./types.js";
 
@@ -6,12 +7,18 @@ const requireFromHere = createRequire(import.meta.url);
 
 let glimpseModule: { open: (html: string, options: Record<string, unknown>) => any } | null = null;
 
+function getRuntimePlatform() {
+  return process.env.PI_GENERATIVE_UI_TEST_PLATFORM || process.platform;
+}
+
 function isMissingGlimpseDependency(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("Cannot find module") && message.includes("glimpseui");
 }
 
 function resolveGlimpsePath(): string {
+  const override = process.env.PI_GENERATIVE_UI_GLIMPSE_MODULE;
+  if (override) return isAbsolute(override) ? override : resolve(process.cwd(), override);
   return requireFromHere.resolve("glimpseui/src/glimpse.mjs");
 }
 
@@ -27,11 +34,12 @@ export class GlimpseBackend implements WidgetBackend {
   kind = "glimpse" as const;
 
   async checkSupport() {
-    if (process.platform !== "darwin") {
+    const platform = getRuntimePlatform();
+    if (platform !== "darwin") {
       return {
         ok: false as const,
         code: "UNSUPPORTED_PLATFORM" as const,
-        reason: `Platform ${process.platform} is not supported by the macOS Glimpse backend.`,
+        reason: `Platform ${platform} is not supported by the macOS Glimpse backend.`,
       };
     }
 
