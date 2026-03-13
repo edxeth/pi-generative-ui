@@ -1,8 +1,8 @@
-const { spawn } = require("node:child_process");
-const path = require("node:path");
-const { StringDecoder } = require("node:string_decoder");
+import { spawn } from "node:child_process";
+import * as path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
-const repoRoot = path.resolve(__dirname, "..");
+const repoRoot = path.resolve(process.cwd());
 const piBin = process.env.PI_VERIFY_PI_BIN || "pi";
 const scenarioTimeoutMs = Number(process.env.PI_VERIFY_TIMEOUT_MS || 180000);
 const windowTimeoutMs = Number(process.env.PI_VERIFY_WINDOW_TIMEOUT_MS || 20000);
@@ -185,7 +185,7 @@ async function listMacWindowTitles() {
   try {
     const titles = JSON.parse(output);
     return Array.isArray(titles) ? titles.filter((title) => typeof title === "string") : [];
-  } catch (error) {
+  } catch {
     throw new Error(`Failed to parse macOS window titles: ${output}`);
   }
 }
@@ -214,7 +214,7 @@ async function closeWindowByTitle(title) {
     ["-l", "JavaScript", "-e", CLOSE_WINDOW_JXA],
     {
       env: { ...process.env, PI_TARGET_TITLE: title },
-    }
+    },
   );
 }
 
@@ -247,7 +247,7 @@ function createMessageRoundtripScenario() {
     windowTitle,
     prompt: createPrompt(
       widgetTitle,
-      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}button{padding:10px 14px;border-radius:10px;border:0;background:#4f46e5;color:#fff;font-weight:600}</style><main><button id="send">macOS Glimpse roundtrip</button></main><script>setTimeout(()=>window.glimpse.send(${JSON.stringify(payload)}),1200);</script>`
+      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}button{padding:10px 14px;border-radius:10px;border:0;background:#4f46e5;color:#fff;font-weight:600}</style><main><button id="send">macOS Glimpse roundtrip</button></main><script>setTimeout(()=>window.glimpse.send(${JSON.stringify(payload)}),1200);</script>`,
     ),
     async onPrompt() {
       logScenarioStep(this.name, `waiting for native window ${JSON.stringify(windowTitle)}`);
@@ -260,7 +260,12 @@ function createMessageRoundtripScenario() {
       if (!messageData || typeof messageData !== "object") {
         throw new Error(`Expected messageData object, got ${JSON.stringify(messageData)}`);
       }
-      if (messageData.ok !== true || messageData.backend !== payload.backend || messageData.scenario !== payload.scenario || messageData.token !== payload.token) {
+      if (
+        messageData.ok !== true
+        || messageData.backend !== payload.backend
+        || messageData.scenario !== payload.scenario
+        || messageData.token !== payload.token
+      ) {
         throw new Error(`Unexpected messageData payload: ${JSON.stringify(messageData)}`);
       }
     },
@@ -281,7 +286,7 @@ function createManualCloseScenario() {
     windowTitle,
     prompt: createPrompt(
       widgetTitle,
-      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}</style><main>macOS Glimpse manual close check</main>`
+      `<style>body{font-family:system-ui;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}</style><main>macOS Glimpse manual close check</main>`,
     ),
     async onPrompt() {
       logScenarioStep(this.name, `waiting for native window ${JSON.stringify(windowTitle)}`);
@@ -336,7 +341,7 @@ async function main() {
     let message;
     try {
       message = JSON.parse(line);
-    } catch (error) {
+    } catch {
       if (state.pendingScenario) state.pendingScenario.fail(new Error(`Invalid JSON from pi: ${line}`));
       return;
     }
@@ -387,7 +392,7 @@ async function main() {
     const id = `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const responsePromise = onceResponse(state, id);
     child.stdin.write(`${JSON.stringify({ id, ...command })}\n`);
-    return await responsePromise;
+    return responsePromise;
   };
 
   try {

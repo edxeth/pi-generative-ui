@@ -1,8 +1,8 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 
-const rootDir = path.resolve(__dirname, "..");
+const rootDir = path.resolve(process.cwd());
 const linuxSourcePath = path.join(rootDir, ".pi/extensions/generative-ui/native/linux/src/main.cc");
 const linuxBinDir = path.join(rootDir, ".pi/extensions/generative-ui/native/linux/bin");
 const linuxHelperPath = path.join(linuxBinDir, "pi-generative-ui-linux-helper");
@@ -111,7 +111,7 @@ function ensureLinuxHelper() {
   const detected = detectRuntimeToolchain();
   fs.writeFileSync(
     path.join(linuxBinDir, "build-info.json"),
-    JSON.stringify(
+    `${JSON.stringify(
       {
         backend: "linux-webview",
         helper: path.relative(rootDir, linuxHelperPath),
@@ -120,14 +120,13 @@ function ensureLinuxHelper() {
       },
       null,
       2,
-    ) + "\n",
+    )}\n`,
   );
 
   process.stdout.write(`Built Linux helper: ${path.relative(rootDir, linuxHelperPath)}\n`);
   process.stdout.write(runtimeProbe.stdout);
 }
 
-(function main() {
-  if (process.platform !== "linux") return;
+if (process.platform === "linux") {
   ensureLinuxHelper();
-})();
+}
