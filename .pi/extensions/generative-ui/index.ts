@@ -94,7 +94,42 @@ export default function (pi: ExtensionAPI) {
     floating: boolean;
   }
 
+  type WidgetTerminalPhase = "preparing" | "generating" | "opening" | "ready";
+
   let streaming: StreamingWidget | null = null;
+  let widgetTerminalStatus: {
+    title: string;
+    width: number;
+    height: number;
+    phase: WidgetTerminalPhase;
+  } | null = null;
+
+  function normalizeWidgetTitle(title: string) {
+    return title.replace(/_/g, " ");
+  }
+
+  function setWidgetTerminalStatus(title: string, width: number, height: number, phase: WidgetTerminalPhase) {
+    widgetTerminalStatus = {
+      title: normalizeWidgetTitle(title),
+      width,
+      height,
+      phase,
+    };
+  }
+
+  function clearWidgetTerminalStatus() {
+    widgetTerminalStatus = null;
+  }
+
+  function getWidgetTerminalPhase(args: any): WidgetTerminalPhase | null {
+    if (!widgetTerminalStatus) return null;
+    const title = normalizeWidgetTitle(args.title ?? "widget");
+    const width = args.width ?? 800;
+    const height = args.height ?? 600;
+    if (widgetTerminalStatus.title !== title) return null;
+    if (widgetTerminalStatus.width !== width || widgetTerminalStatus.height !== height) return null;
+    return widgetTerminalStatus.phase;
+  }
 
   function sendStreamingContent(streamState: StreamingWidget, html: string, runScripts = false) {
     if (!streamState.window || !streamState.ready) return false;
@@ -143,12 +178,15 @@ export default function (pi: ExtensionAPI) {
   async function abandonStreamingWindow(streamState: StreamingWidget | null) {
     if (!streamState) return;
     if (streaming === streamState) streaming = null;
+    clearWidgetTerminalStatus();
     await closeStreamingWindow(streamState);
   }
 
   async function ensureSupport() {
     const support = await backend.checkSupport();
-    if (!support.ok) throw new Error(formatSupportError(backend.kind, support));
+    if (!support.ok) {
+      throw new Error(formatSupportError(backend.kind, support as any));
+    }
   }
 
   async function openWidgetWindow(html: string, options: { title: string; width: number; height: number; floating?: boolean }) {
@@ -181,11 +219,12 @@ export default function (pi: ExtensionAPI) {
           updateTimer: null,
           ready: false,
           opening: null,
-          title: (args.title ?? "Widget").replace(/_/g, " "),
+          title: normalizeWidgetTitle(args.title ?? "Widget"),
           width: args.width ?? 800,
           height: args.height ?? 600,
           floating: args.floating ?? false,
         };
+        setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "preparing");
       }
       return;
     }
@@ -198,10 +237,11 @@ export default function (pi: ExtensionAPI) {
       if (!html || html.length < 20 || html === streaming.lastHTML) return;
 
       streaming.lastHTML = html;
-      streaming.title = (args.title ?? streaming.title ?? "Widget").replace(/_/g, " ");
+      streaming.title = normalizeWidgetTitle(args.title ?? streaming.title ?? "Widget");
       streaming.width = args.width ?? streaming.width;
       streaming.height = args.height ?? streaming.height;
       streaming.floating = args.floating ?? streaming.floating;
+      setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "generating");
 
       if (streaming.updateTimer) return;
       const streamState = streaming;
@@ -210,6 +250,7 @@ export default function (pi: ExtensionAPI) {
 
         try {
           if (!streamState.window && !streamState.opening) {
+            setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "opening");
             streamState.opening = openWidgetWindow(shellHTML(), {
               title: streamState.title,
               width: streamState.width,
@@ -232,6 +273,7 @@ export default function (pi: ExtensionAPI) {
                 return;
               }
               streamState.ready = true;
+              setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "generating");
               flushStreamingContent(streamState);
             });
           } else if (streamState.window && streamState.ready) {
@@ -254,6 +296,7 @@ export default function (pi: ExtensionAPI) {
       if (toolCall?.arguments?.widget_code) {
         streaming.finalHTML = toolCall.arguments.widget_code;
         flushStreamingContent(streaming);
+        setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "ready");
       }
       return;
     }
@@ -346,7 +389,7 @@ export default function (pi: ExtensionAPI) {
       floating: Type.Optional(Type.Boolean({ description: "Keep window always on top. Default: false." })),
     }),
 
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal, onUpdate) {
       if (!params.i_have_seen_read_me) {
         throw new Error("You must call visualize_read_me before show_widget. Set i_have_seen_read_me: true after doing so.");
       }
@@ -354,10 +397,28 @@ export default function (pi: ExtensionAPI) {
       hasSeenReadMe = true;
       const code = params.widget_code;
       const isSVG = code.trimStart().startsWith("<svg");
-      const title = params.title.replace(/_/g, " ");
+      const title = normalizeWidgetTitle(params.title);
       const width = params.width ?? 800;
       const height = params.height ?? 600;
       let win: WidgetWindow | null = null;
+
+      const emitPartialStatus = (phase: "opening" | "ready") => {
+        onUpdate?.({
+          content: [{
+            type: "text" as const,
+            text: phase === "ready"
+              ? `Widget finished generating. Waiting for interaction or window close (${title}, ${width}×${height}).`
+              : `Opening widget window (${title}, ${width}×${height})...`,
+          }],
+          details: {
+            title: params.title,
+            width,
+            height,
+            isSVG,
+            phase,
+          },
+        });
+      };
 
       const streamState = streaming;
       if (streamState?.window || streamState?.opening) {
@@ -365,14 +426,20 @@ export default function (pi: ExtensionAPI) {
         streamState.window = win;
         streamState.finalHTML = streamState.finalHTML ?? code;
         flushStreamingContent(streamState);
+        setWidgetTerminalStatus(title, width, height, "ready");
+        emitPartialStatus("ready");
         streaming = null;
       } else {
+        setWidgetTerminalStatus(title, width, height, "opening");
+        emitPartialStatus("opening");
         win = await openWidgetWindow(wrapHTML(code, isSVG), {
           width,
           height,
           title,
           floating: params.floating ?? false,
         });
+        setWidgetTerminalStatus(title, width, height, "ready");
+        emitPartialStatus("ready");
       }
 
       return new Promise<any>((resolve, reject) => {
@@ -391,6 +458,7 @@ export default function (pi: ExtensionAPI) {
           if (resolved) return;
           resolved = true;
           clearTimeout(timeout);
+          clearWidgetTerminalStatus();
           activeWindows = activeWindows.filter((window) => window !== win);
           resolve({
             content: [
@@ -422,6 +490,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         win.on("error", (err: unknown) => {
+          clearWidgetTerminalStatus();
           reject(err instanceof Error ? err : new Error(String(err)));
         });
 
@@ -435,20 +504,35 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderCall(args: any, theme: any) {
-      const title = (args.title ?? "widget").replace(/_/g, " ");
-      const size = args.width && args.height ? ` ${args.width}×${args.height}` : "";
+      const title = normalizeWidgetTitle(args.title ?? "widget");
+      const width = args.width ?? 800;
+      const height = args.height ?? 600;
+      const phase = getWidgetTerminalPhase({ ...args, title, width, height });
+      const size = ` ${width}×${height}`;
       let text = theme.fg("toolTitle", theme.bold("show_widget "));
       text += theme.fg("accent", title);
-      if (size) text += theme.fg("dim", size);
+      text += theme.fg("dim", size);
+      if (phase === "preparing") text += theme.fg("warning", " [preparing]");
+      if (phase === "generating") text += theme.fg("warning", " [generating]");
+      if (phase === "opening") text += theme.fg("warning", " [opening]");
+      if (phase === "ready") text += theme.fg("success", " [finished, waiting]");
       return new Text(text, 0, 0);
     },
 
     renderResult(result: any, { isPartial, expanded }: any, theme: any) {
+      const details = result.details ?? {};
+
       if (isPartial) {
-        return new Text(theme.fg("warning", "⟳ Widget rendering..."), 0, 0);
+        const phase = details.phase;
+        if (phase === "opening") {
+          return new Text(theme.fg("warning", "⟳ Opening widget window..."), 0, 0);
+        }
+        if (phase === "ready") {
+          return new Text(theme.fg("success", "✓ Widget finished generating — waiting for interaction or window close"), 0, 0);
+        }
+        return new Text(theme.fg("warning", "⟳ Widget generating..."), 0, 0);
       }
 
-      const details = result.details ?? {};
       const contentText = (result.content ?? [])
         .filter((item: any) => item?.type === "text" && typeof item.text === "string")
         .map((item: any) => item.text)
@@ -482,6 +566,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     if (streaming?.updateTimer) clearTimeout(streaming.updateTimer);
     streaming = null;
+    clearWidgetTerminalStatus();
     for (const win of activeWindows) {
       try { win.close(); } catch {}
     }
