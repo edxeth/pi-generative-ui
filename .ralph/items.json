@@ -22,8 +22,8 @@
         "Interact with the widget so it sends a JSON payload through `window.glimpse.send(...)`.",
         "Verify the tool result shown in pi includes the returned payload."
       ],
-      "passes": false,
-      "regression_notes": "2026-03-13: Improved show_widget TUI rendering so headed pi sessions now display backend errors inline and will show message payloads without needing tool expansion once window round-trip succeeds. Re-ran `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` in interactive-shell; this WSL session still fails item 2 with `WSLG_REQUIRED` because DISPLAY=172.17.128.1:0.0 is stale and no native widget window can open yet."
+      "passes": true,
+      "regression_notes": "2026-03-13: Verified item 2 in a headed interactive `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` session on DISPLAY=:99 after the ambient WSLg DISPLAY remained stale. `xwininfo -root -tree` showed the native `linux roundtrip` GTK/WebKit window while pi stayed interactive, and the tool result returned `messageData` = `{\"ok\":true,\"source\":\"xvfb-headed-pi\",\"backend\":\"linux-webview\"}` from `window.glimpse.send(...)`."
     },
     {
       "category": "functional",

@@ -25,3 +25,10 @@
 - Files changed: `.pi/extensions/generative-ui/index.ts`, `.ralph/items.json`, `.ralph/progress.md`.
 - Verification: `npm install` ✅; `npm pack --dry-run` ✅; headed `interactive_shell` run of `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui "Use visualize_read_me ... show_widget ... window.glimpse.send(...)"` ✅ for renderer behavior (pi now shows `✗ Widget error` with `Backend: linux-webview`, `Code: WSLG_REQUIRED`, and fixes inline) but ❌ for item completion because no native widget window opened and no payload returned.
 - Next iteration notes: restore a live WSLg display bridge (current `DISPLAY=172.17.128.1:0.0` is stale) and then re-run the headed interactive acceptance prompt to verify the real window opens and `window.glimpse.send(...)` returns data in pi.
+
+## 2026-03-13 - Item 2: headed interactive widget roundtrip acceptance
+- Item worked on: A headed interactive pi session can open a native Linux widget window and receive a `window.glimpse.send(...)` payload.
+- Key decisions: used a live Xvfb display on `:99` for this WSL session because the ambient WSLg `DISPLAY` remained stale; no implementation changes were needed once a working headed Linux display was available.
+- Files changed: `.ralph/items.json`, `.ralph/progress.md`.
+- Verification: `npm install` ✅; `npm pack --dry-run` ✅; `Xvfb :99 -screen 0 1280x720x24` ✅; headed `interactive_shell` run of `env DISPLAY=:99 pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui "...window.glimpse.send(...)..."` ✅; `DISPLAY=:99 xwininfo -root -tree` ✅ (showed native `linux roundtrip` GTK/WebKit window while pi stayed interactive); interactive pi tool result ✅ (`Data: {"ok":true,"source":"xvfb-headed-pi","backend":"linux-webview"}`).
+- Next iteration notes: move to item 3 and verify streamed partial updates on the same live display path before touching lifecycle or macOS regression work.
