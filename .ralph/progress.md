@@ -46,3 +46,10 @@
 - Files changed: `.pi/extensions/generative-ui/index.ts`, `.ralph/items.json`, `.ralph/progress.md`.
 - Verification: `npm install` ✅; `npm pack --dry-run` ✅; headed `interactive_shell` run of `env DISPLAY=:103 pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui "...manual_close_verify..."` ✅; `DISPLAY=:103 xwininfo -root -tree` before/after `xkill` ✅ (native `manual close verify` window disappeared); `pgrep -af pi-generative-ui-linux-helper` after manual close ✅ (no helper left); headed Linux `pi --mode rpc` abort harness on DISPLAY=:103 ✅ (`tool_execution_start` observed, abort sent, tool result details reported `closedReason:"Aborted."`, native `rpc abort verify` window gone, no orphan helper).
 - Next iteration notes: only the macOS regression item remains failing; complete it in a real macOS environment instead of guessing from Linux.
+
+## 2026-03-13 - Item 7: macOS regression harness prep
+- Item worked on: The macOS Glimpse backend path remains intact and is ready for regression verification in a real macOS environment.
+- Key decisions: added a deterministic `pi --mode rpc` harness that exercises the Glimpse message roundtrip and close semantics on macOS, but kept the item failing because this WSL2/Linux environment cannot perform the required real-macOS run.
+- Files changed: `scripts/verify-macos-glimpse.js`, `.ralph/items.json`, `.ralph/progress.md`.
+- Verification: `node --check scripts/verify-macos-glimpse.js` ✅; `npm install` ✅; `npm pack --dry-run` ✅; `node scripts/verify-macos-glimpse.js` ❌ as expected on Linux (`must be run in a real macOS environment`).
+- Next iteration notes: run `node scripts/verify-macos-glimpse.js` on macOS with pi and model credentials configured, confirm the headed Glimpse windows visibly open during both scenarios, then update item 7 only if the real macOS run passes.
