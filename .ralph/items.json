@@ -23,7 +23,7 @@
         "Verify the tool result shown in pi includes the returned payload."
       ],
       "passes": false,
-      "regression_notes": ""
+      "regression_notes": "2026-03-13: Improved show_widget TUI rendering so headed pi sessions now display backend errors inline and will show message payloads without needing tool expansion once window round-trip succeeds. Re-ran `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` in interactive-shell; this WSL session still fails item 2 with `WSLG_REQUIRED` because DISPLAY=172.17.128.1:0.0 is stale and no native widget window can open yet."
     },
     {
       "category": "functional",

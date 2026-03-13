@@ -383,13 +383,31 @@ export default function (pi: ExtensionAPI) {
       }
 
       const details = result.details ?? {};
+      const contentText = (result.content ?? [])
+        .filter((item: any) => item?.type === "text" && typeof item.text === "string")
+        .map((item: any) => item.text)
+        .join("\n")
+        .trim();
+
+      const looksLikeError = typeof details.title !== "string" && contentText.startsWith("Backend:");
+      if (looksLikeError) {
+        let text = theme.fg("error", "✗ Widget error");
+        if (contentText) text += "\n" + theme.fg("muted", `  ${contentText.replace(/\n/g, "\n  ")}`);
+        return new Text(text, 0, 0);
+      }
+
       const title = (details.title ?? "widget").replace(/_/g, " ");
       let text = theme.fg("success", "✓ ") + theme.fg("accent", title);
       text += theme.fg("dim", ` ${details.width ?? 800}×${details.height ?? 600}`);
       if (details.isSVG) text += theme.fg("dim", " (SVG)");
 
       if (details.closedReason) text += "\n" + theme.fg("muted", `  ${details.closedReason}`);
-      if (expanded && details.messageData) text += "\n" + theme.fg("dim", `  Data: ${JSON.stringify(details.messageData, null, 2)}`);
+      if (details.messageData !== undefined) {
+        const messageText = expanded
+          ? JSON.stringify(details.messageData, null, 2)
+          : JSON.stringify(details.messageData);
+        text += "\n" + theme.fg("dim", `  Data: ${messageText}`);
+      }
 
       return new Text(text, 0, 0);
     },
