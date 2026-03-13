@@ -34,8 +34,8 @@
         "Verify at least one intermediate DOM update is visible before final completion.",
         "Verify the finalized widget executes its deferred scripts after the final payload arrives."
       ],
-      "passes": false,
-      "regression_notes": ""
+      "passes": true,
+      "regression_notes": "2026-03-13: Fixed streamed-window finalization so deferred scripts execute exactly once and execute() reuses an in-flight streamed window instead of re-sending the final payload. Verified in a headed `env DISPLAY=:101 pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` session: pi showed `show_widget stream probe` while still working, `xwininfo -root -tree` showed the native window before completion, ImageMagick captures on the live Xvfb display changed between shot1/shot2 (`compare -metric AE` = 877) before stabilizing at shot3 (`diff23=0`), and the returned widget payload reported `scriptRuns:1`, `finalStatus:\"finalized\"`, `rowCount:48`."
     },
     {
       "category": "functional",

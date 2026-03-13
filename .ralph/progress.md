@@ -32,3 +32,10 @@
 - Files changed: `.ralph/items.json`, `.ralph/progress.md`.
 - Verification: `npm install` ✅; `npm pack --dry-run` ✅; `Xvfb :99 -screen 0 1280x720x24` ✅; headed `interactive_shell` run of `env DISPLAY=:99 pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui "...window.glimpse.send(...)..."` ✅; `DISPLAY=:99 xwininfo -root -tree` ✅ (showed native `linux roundtrip` GTK/WebKit window while pi stayed interactive); interactive pi tool result ✅ (`Data: {"ok":true,"source":"xvfb-headed-pi","backend":"linux-webview"}`).
 - Next iteration notes: move to item 3 and verify streamed partial updates on the same live display path before touching lifecycle or macOS regression work.
+
+## 2026-03-13 - Item 3: streamed widget finalization
+- Item worked on: Streamed widget rendering updates appear incrementally in the headed pi session and finalize by executing deferred scripts once.
+- Key decisions: fixed the streamed-window state machine to track final HTML separately from partial HTML, execute deferred scripts only once, and reuse an in-flight streamed window from `show_widget.execute()` instead of re-sending the final payload.
+- Files changed: `.pi/extensions/generative-ui/index.ts`, `.ralph/items.json`, `.ralph/progress.md`.
+- Verification: `npm install` ✅; `npm pack --dry-run` ✅; `Xvfb :101 -screen 0 1280x720x24` ✅; headed `interactive_shell` run of `env DISPLAY=:101 pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui "Use visualize_read_me ... show_widget ..."` ✅; first status check at 34s showed `show_widget stream probe 860×760` while pi was still working ✅; `DISPLAY=:101 xwininfo -root -tree` ✅ (native `stream probe` window visible before completion); `DISPLAY=:101 import ...` + `compare -metric AE` ✅ (`diff12=877`, `diff23=0`, confirming an intermediate visible DOM update before the final stable render); final interactive pi output after kill ✅ (`Data: {"scriptRuns":1,"finalStatus":"finalized","rowCount":48}`).
+- Next iteration notes: move to item 4 and verify manual-close plus abort semantics, including orphan-helper cleanup, on the same Xvfb-headed Linux path before attempting macOS regression work.

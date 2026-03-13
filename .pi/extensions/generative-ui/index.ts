@@ -83,6 +83,8 @@ export default function (pi: ExtensionAPI) {
     contentIndex: number;
     window: WidgetWindow | null;
     lastHTML: string;
+    finalHTML: string | null;
+    finalApplied: boolean;
     updateTimer: NodeJS.Timeout | null;
     ready: boolean;
     opening: Promise<WidgetWindow> | null;
@@ -93,6 +95,30 @@ export default function (pi: ExtensionAPI) {
   }
 
   let streaming: StreamingWidget | null = null;
+
+  function sendStreamingContent(streamState: StreamingWidget, html: string, runScripts = false) {
+    if (!streamState.window || !streamState.ready) return false;
+    const escaped = escapeJS(html);
+    streamState.window.send(runScripts
+      ? `window._setContent('${escaped}'); window._runScripts();`
+      : `window._setContent('${escaped}')`
+    );
+    if (runScripts) {
+      streamState.finalHTML = html;
+      streamState.finalApplied = true;
+    }
+    return true;
+  }
+
+  function flushStreamingContent(streamState: StreamingWidget) {
+    if (streamState.finalHTML && !streamState.finalApplied) {
+      return sendStreamingContent(streamState, streamState.finalHTML, true);
+    }
+    if (!streamState.finalHTML && streamState.lastHTML) {
+      return sendStreamingContent(streamState, streamState.lastHTML, false);
+    }
+    return false;
+  }
 
   async function ensureSupport() {
     const support = await backend.checkSupport();
@@ -124,6 +150,8 @@ export default function (pi: ExtensionAPI) {
           contentIndex: raw.contentIndex,
           window: null,
           lastHTML: "",
+          finalHTML: null,
+          finalApplied: false,
           updateTimer: null,
           ready: false,
           opening: null,
@@ -150,36 +178,32 @@ export default function (pi: ExtensionAPI) {
       streaming.floating = args.floating ?? streaming.floating;
 
       if (streaming.updateTimer) return;
+      const streamState = streaming;
       streaming.updateTimer = setTimeout(async () => {
-        if (!streaming) return;
-        streaming.updateTimer = null;
+        streamState.updateTimer = null;
 
         try {
-          if (!streaming.window && !streaming.opening) {
-            streaming.opening = openWidgetWindow(shellHTML(), {
-              title: streaming.title,
-              width: streaming.width,
-              height: streaming.height,
-              floating: streaming.floating,
+          if (!streamState.window && !streamState.opening) {
+            streamState.opening = openWidgetWindow(shellHTML(), {
+              title: streamState.title,
+              width: streamState.width,
+              height: streamState.height,
+              floating: streamState.floating,
             });
 
-            const win = await streaming.opening;
-            if (!streaming) return;
-            streaming.window = win;
-            streaming.opening = null;
+            const win = await streamState.opening;
+            streamState.window = win;
+            streamState.opening = null;
 
             win.on("ready", () => {
-              if (!streaming || streaming.window !== win) return;
-              streaming.ready = true;
-              const escaped = escapeJS(streaming.lastHTML);
-              win.send(`window._setContent('${escaped}')`);
+              streamState.ready = true;
+              flushStreamingContent(streamState);
             });
-          } else if (streaming.window && streaming.ready) {
-            const escaped = escapeJS(streaming.lastHTML);
-            streaming.window.send(`window._setContent('${escaped}')`);
+          } else if (streamState.window && streamState.ready) {
+            flushStreamingContent(streamState);
           }
         } catch {
-          if (streaming) streaming.opening = null;
+          streamState.opening = null;
         }
       }, 150);
       return;
@@ -192,9 +216,9 @@ export default function (pi: ExtensionAPI) {
       }
 
       const toolCall = raw.toolCall;
-      if (toolCall?.arguments?.widget_code && streaming.window && streaming.ready) {
-        const escaped = escapeJS(toolCall.arguments.widget_code);
-        streaming.window.send(`window._setContent('${escaped}'); window._runScripts();`);
+      if (toolCall?.arguments?.widget_code) {
+        streaming.finalHTML = toolCall.arguments.widget_code;
+        flushStreamingContent(streaming);
       }
       return;
     }
@@ -293,12 +317,12 @@ export default function (pi: ExtensionAPI) {
       const height = params.height ?? 600;
       let win: WidgetWindow | null = null;
 
-      if (streaming?.window) {
-        win = streaming.window;
-        if (streaming.ready) {
-          const escaped = escapeJS(code);
-          win.send(`window._setContent('${escaped}'); window._runScripts();`);
-        }
+      const streamState = streaming;
+      if (streamState?.window || streamState?.opening) {
+        win = streamState.window ?? await streamState.opening!;
+        streamState.window = win;
+        streamState.finalHTML = streamState.finalHTML ?? code;
+        flushStreamingContent(streamState);
         streaming = null;
       } else {
         win = await openWidgetWindow(wrapHTML(code, isSVG), {
