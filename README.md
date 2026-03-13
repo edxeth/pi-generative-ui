@@ -23,7 +23,7 @@ The widget window has full browser capabilities (WKWebView) and a bidirectional 
 ## Install
 
 ```bash
-pi install git:github.com/user/pi-generative-ui
+pi install git:github.com/Michaelliv/pi-generative-ui
 ```
 
 > macOS only. Requires Swift toolchain (ships with Xcode or Xcode Command Line Tools).
