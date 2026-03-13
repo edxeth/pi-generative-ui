@@ -1,13 +1,14 @@
 import { EventEmitter } from "node:events";
-import { accessSync, constants, existsSync } from "node:fs";
-import { readFileSync } from "node:fs";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BackendSupportError, WidgetBackend, WidgetWindow, OpenWindowOptions } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HELPER_PATH = join(__dirname, "../native/linux/bin/pi-generative-ui-linux-helper");
+const DEFAULT_HELPER_PATH = join(__dirname, "../native/linux/bin/pi-generative-ui-linux-helper");
+const HELPER_PATH_ENV = "PI_GENERATIVE_UI_LINUX_HELPER_PATH";
+const PROBE_TIMEOUT_MS = 4000;
 
 function isWSL(): boolean {
   if (process.env.WSL_DISTRO_NAME) return true;
@@ -26,8 +27,121 @@ function hasDisplay(): boolean {
   return Boolean(process.env.WAYLAND_DISPLAY || process.env.DISPLAY);
 }
 
-function shellQuote(value: string): string {
-  return JSON.stringify(value);
+function helperPath(): string {
+  const override = process.env[HELPER_PATH_ENV]?.trim();
+  return override ? override : DEFAULT_HELPER_PATH;
+}
+
+function runtimeFixes(): string[] {
+  return [
+    "Install a supported GTK/WebKitGTK runtime (Ubuntu 24 / WSL2: sudo apt install -y libgtk-3-0 libwebkit2gtk-4.1-0).",
+    isWSL() ? "WSLg must be enabled for native Linux windows on WSL2." : "Run inside a GUI-capable Linux session.",
+  ];
+}
+
+function displayFixes(): string[] {
+  return isWSL()
+    ? [
+        "Start the distro through Windows Subsystem for Linux with WSLg enabled.",
+        "Confirm DISPLAY or WAYLAND_DISPLAY points to a live WSLg server before launching pi.",
+        "If DISPLAY is stale, run `wsl --shutdown` from Windows and restart Ubuntu.",
+      ]
+    : ["Launch pi from a GUI-capable Linux session with DISPLAY or WAYLAND_DISPLAY set."];
+}
+
+function displayError(reason: string): BackendSupportError {
+  return helperError(isWSL() ? "WSLG_REQUIRED" : "NO_GUI_DISPLAY", reason, displayFixes());
+}
+
+function classifyProbeFailure(output: string, code: number | null, signal: NodeJS.Signals | null): BackendSupportError {
+  const text = output.trim();
+  const lower = text.toLowerCase();
+
+  if (
+    lower.includes("gtk could not initialize a gui display") ||
+    lower.includes("cannot open display") ||
+    lower.includes("wayland") ||
+    lower.includes("display")
+  ) {
+    return displayError(text || "Linux helper could not connect to a GUI display.");
+  }
+
+  if (
+    lower.includes("webkit") ||
+    lower.includes("javascriptcore") ||
+    lower.includes("libgtk") ||
+    lower.includes("libwebkit") ||
+    lower.includes("gtk-")
+  ) {
+    return helperError(
+      "WEBKIT_RUNTIME_MISSING",
+      text || "Linux helper self-test failed because the GTK/WebKit runtime is unavailable.",
+      runtimeFixes(),
+    );
+  }
+
+  return helperError(
+    "BACKEND_START_FAILED",
+    text || `Linux helper self-test failed (code=${code}, signal=${signal}).`,
+    runtimeFixes(),
+  );
+}
+
+async function probeHelperOpen(path: string): Promise<BackendSupportError | { ok: true }> {
+  return await new Promise((resolve) => {
+    const child = spawn(path, ["--probe-open"], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (result: BackendSupportError | { ok: true }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      finish(helperError("BACKEND_START_FAILED", `Failed to start Linux helper probe: ${error.message}`, runtimeFixes()));
+    });
+
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        finish({ ok: true as const });
+        return;
+      }
+      const combined = [stdout, stderr].filter(Boolean).join("\n");
+      finish(classifyProbeFailure(combined, code, signal));
+    });
+
+    const timer = setTimeout(() => {
+      const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+      try {
+        child.kill("SIGTERM");
+      } catch {}
+      finish(
+        displayError(
+          combined ||
+            `Linux helper probe did not connect to a GUI display within ${PROBE_TIMEOUT_MS}ms.`,
+        ),
+      );
+    }, PROBE_TIMEOUT_MS);
+    timer.unref();
+  });
 }
 
 class LinuxWidgetWindow extends EventEmitter implements WidgetWindow {
@@ -160,62 +274,42 @@ export class LinuxWebviewBackend implements WidgetBackend {
       return helperError("UNSUPPORTED_PLATFORM", `Platform ${process.platform} is not supported by the Linux webview backend.`);
     }
 
-    if (!existsSync(HELPER_PATH)) {
+    const path = helperPath();
+
+    if (!existsSync(path)) {
       return helperError(
         "BACKEND_BINARY_MISSING",
-        `Missing Linux helper binary at ${HELPER_PATH}.`,
-        ["Run npm install so postinstall builds the Linux helper binary."],
+        `Missing Linux helper binary at ${path}.`,
+        [
+          `Run npm install so postinstall builds the Linux helper binary at ${DEFAULT_HELPER_PATH}.`,
+          `Set ${HELPER_PATH_ENV} only when intentionally overriding the helper path.`,
+        ],
       );
     }
 
     try {
-      accessSync(HELPER_PATH, constants.X_OK);
+      accessSync(path, constants.X_OK);
     } catch {
       return helperError(
         "BACKEND_BINARY_NOT_EXECUTABLE",
-        `Linux helper binary is not executable: ${HELPER_PATH}.`,
+        `Linux helper binary is not executable: ${path}.`,
         ["Run chmod +x on the helper or rerun npm install to rebuild it."],
       );
     }
 
     if (!hasDisplay()) {
-      return helperError(
-        isWSL() ? "WSLG_REQUIRED" : "NO_GUI_DISPLAY",
+      return displayError(
         isWSL()
           ? "WSLg is required to open native widget windows on the supported WSL2 path, but neither DISPLAY nor WAYLAND_DISPLAY is set."
           : "No GUI display is available because neither DISPLAY nor WAYLAND_DISPLAY is set.",
-        isWSL()
-          ? [
-              "Start the distro through Windows Subsystem for Linux with WSLg enabled.",
-              "Confirm DISPLAY or WAYLAND_DISPLAY is set inside the shell before launching pi.",
-            ]
-          : ["Launch pi from a GUI-capable Linux session with DISPLAY or WAYLAND_DISPLAY set."],
       );
     }
 
-    const probe = spawnSync(HELPER_PATH, ["--probe-open"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
-    });
-
-    if (probe.status !== 0) {
-      const combined = [probe.stdout, probe.stderr].filter(Boolean).join("\n").trim();
-      return helperError(
-        /webkit|gtk/i.test(combined) ? "WEBKIT_RUNTIME_MISSING" : "BACKEND_START_FAILED",
-        combined || "Linux helper self-test failed.",
-        [
-          "Install a supported GTK/WebKitGTK runtime (Ubuntu 24 / WSL2: sudo apt install -y libgtk-3-0 libwebkit2gtk-4.1-0).",
-          isWSL() ? "WSLg must be enabled for native Linux windows on WSL2." : "Run inside a GUI-capable Linux session.",
-        ],
-      );
-    }
-
-    return { ok: true as const };
+    return await probeHelperOpen(path);
   }
 
   async open(html: string, options: OpenWindowOptions): Promise<WidgetWindow> {
-    const child = spawn(HELPER_PATH, [], {
+    const child = spawn(helperPath(), [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
@@ -224,5 +318,5 @@ export class LinuxWebviewBackend implements WidgetBackend {
 }
 
 export function linuxHelperPath() {
-  return HELPER_PATH;
+  return helperPath();
 }

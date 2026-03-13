@@ -57,8 +57,8 @@
         "Exercise the extension with the Linux helper binary missing or non-executable and verify the reported error names that specific condition.",
         "Exercise the extension in a missing runtime/dependency scenario and verify the reported error includes actionable remediation guidance."
       ],
-      "passes": false,
-      "regression_notes": ""
+      "passes": true,
+      "regression_notes": "2026-03-13: Hardened Linux diagnostics to avoid hanging display probes, added helper-path override support for fault injection, and verified `WSLG_REQUIRED` with DISPLAY unset, `BACKEND_BINARY_MISSING`, `BACKEND_BINARY_NOT_EXECUTABLE`, and `WEBKIT_RUNTIME_MISSING` plus remediation guidance via backend.checkSupport()."
     },
     {
       "category": "functional",
