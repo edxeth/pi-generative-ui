@@ -5,6 +5,38 @@ import { Text } from "@mariozechner/pi-tui";
 import { getGuidelines, AVAILABLE_MODULES } from "./guidelines.js";
 import { getWidgetBackend, formatSupportError, type WidgetWindow } from "./backend/index.js";
 
+interface FollowUpPromptMessage {
+  type: "follow_up_prompt";
+  prompt: string;
+  replyMode?: "followUp" | "steer";
+}
+
+function widgetBridgeScript(): string {
+  return `<script>
+  window.sendPrompt = function(prompt, replyMode) {
+    if (!window.glimpse || typeof window.glimpse.send !== 'function') return;
+    if (typeof prompt !== 'string' || !prompt.trim()) return;
+    window.glimpse.send({
+      type: 'follow_up_prompt',
+      prompt: prompt,
+      replyMode: replyMode === 'steer' ? 'steer' : 'followUp'
+    });
+  };
+</script>`;
+}
+
+function extractFollowUpPromptMessage(data: unknown): FollowUpPromptMessage | null {
+  if (!data || typeof data !== "object") return null;
+  const record = data as Record<string, unknown>;
+  if (record.type !== "follow_up_prompt") return null;
+  if (typeof record.prompt !== "string" || !record.prompt.trim()) return null;
+  return {
+    type: "follow_up_prompt",
+    prompt: record.prompt.trim(),
+    replyMode: record.replyMode === "steer" ? "steer" : "followUp",
+  };
+}
+
 // Shell HTML with a root container — used for streaming.
 // Content is injected via win.send() JS eval, not a full reload, to avoid flashes.
 function shellHTML(): string {
@@ -46,6 +78,7 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
     });
   };
 </script>
+${widgetBridgeScript()}
 <script src="https://cdn.jsdelivr.net/npm/morphdom@2.7.4/dist/morphdom-umd.min.js"
   onload="window._morphReady=true;if(window._pending){window._setContent(window._pending);window._pending=null;}"></script>
 </body></html>`;
@@ -56,12 +89,14 @@ function wrapHTML(code: string, isSVG = false): string {
   if (isSVG) {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1a1a1a;color:#e0e0e0;">
-${code}</body></html>`;
+${code}
+${widgetBridgeScript()}</body></html>`;
   }
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <style>*{box-sizing:border-box}body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0}</style>
-</head><body>${code}</body></html>`;
+</head><body>${code}
+${widgetBridgeScript()}</body></html>`;
 }
 
 // Escape a string for safe injection into a JS string literal.
@@ -367,6 +402,7 @@ export default function (pi: ExtensionAPI) {
       "The widget opens in a native platform window with full browser capabilities (Canvas, JS, CDN libraries).",
       "Structure HTML as fragments: no DOCTYPE/<html>/<head>/<body>. Style first, then HTML, then scripts.",
       "The page has window.glimpse.send(data) to send data back. Use it for user choices and interactions.",
+      "For chat shortcut buttons, call sendPrompt('your follow-up prompt') or window.glimpse.send({ type: 'follow_up_prompt', prompt: '...' }).",
       "Keep widgets focused and appropriately sized. Default is 800x600 but adjust to fit content.",
       "For interactive explainers: sliders, live calculations, Chart.js charts.",
       "For SVG: start code with <svg> tag, it will be auto-detected.",
@@ -449,6 +485,8 @@ export default function (pi: ExtensionAPI) {
         }
 
         let messageData: any = null;
+        let followUpPrompt: string | null = null;
+        let followUpReplyMode: "followUp" | "steer" | null = null;
         let resolved = false;
         const timeout = setTimeout(() => {
           finish("Widget still open (timed out waiting for interaction).");
@@ -464,9 +502,11 @@ export default function (pi: ExtensionAPI) {
             content: [
               {
                 type: "text" as const,
-                text: messageData
-                  ? `Widget rendered. User interaction data: ${JSON.stringify(messageData)}`
-                  : `Widget "${title}" rendered and shown to the user (${width}×${height}). ${reason}`,
+                text: followUpPrompt
+                  ? `Widget queued follow-up prompt: ${JSON.stringify(followUpPrompt)}`
+                  : messageData
+                    ? `Widget rendered. User interaction data: ${JSON.stringify(messageData)}`
+                    : `Widget "${title}" rendered and shown to the user (${width}×${height}). ${reason}`,
               },
             ],
             details: {
@@ -475,13 +515,28 @@ export default function (pi: ExtensionAPI) {
               height,
               isSVG,
               messageData,
+              followUpPrompt,
+              followUpReplyMode,
               closedReason: reason,
             },
           });
         };
 
-        win.on("message", (data: unknown) => {
+        win.on("message", async (data: unknown) => {
           messageData = data;
+          const promptMessage = extractFollowUpPromptMessage(data);
+          if (promptMessage) {
+            followUpPrompt = promptMessage.prompt;
+            followUpReplyMode = promptMessage.replyMode ?? "followUp";
+            try {
+              pi.sendUserMessage(promptMessage.prompt, { deliverAs: followUpReplyMode });
+              finish(`Queued follow-up prompt (${followUpReplyMode}).`);
+            } catch (error) {
+              clearWidgetTerminalStatus();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+            return;
+          }
           finish("User sent data from widget.");
         });
 
@@ -552,6 +607,9 @@ export default function (pi: ExtensionAPI) {
       if (details.isSVG) text += theme.fg("dim", " (SVG)");
 
       if (details.closedReason) text += "\n" + theme.fg("muted", `  ${details.closedReason}`);
+      if (details.followUpPrompt) {
+        text += "\n" + theme.fg("dim", `  Queued prompt: ${details.followUpPrompt}`);
+      }
       if (details.messageData !== undefined) {
         const messageText = expanded
           ? JSON.stringify(details.messageData, null, 2)
