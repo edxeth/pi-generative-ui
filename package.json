@@ -6,17 +6,18 @@
   "keywords": ["pi-package"],
   "files": [
     ".pi/extensions/generative-ui",
+    "!.pi/extensions/generative-ui/native/linux/**",
     "scripts",
     "README.md"
   ],
   "pi": {
-    "extensions": [".pi/extensions/generative-ui"]
+    "extensions": [".pi/extensions/generative-ui/index.ts"]
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
   },
   "optionalDependencies": {
-    "glimpseui": "^0.3.5"
+    "glimpseui": "^0.5.1"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",

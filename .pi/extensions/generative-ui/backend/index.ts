@@ -1,6 +1,5 @@
 import type { WidgetBackend } from "./types.js";
 import { GlimpseBackend } from "./glimpse.js";
-import { LinuxWebviewBackend } from "./linux.js";
 
 let backend: WidgetBackend | null = null;
 
@@ -19,7 +18,7 @@ export function getWidgetBackend(): WidgetBackend {
   }
 
   if (platform === "linux") {
-    backend = new LinuxWebviewBackend();
+    backend = new GlimpseBackend();
     return backend;
   }
 

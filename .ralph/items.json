@@ -3,84 +3,70 @@
   "items": [
     {
       "category": "functional",
-      "description": "Linux package installation succeeds on WSL2 Ubuntu 24 with WSLg and required GTK/WebKitGTK development packages, without `EBADPLATFORM`, and produces an executable Linux helper binary.",
+      "description": "Installing pi-generative-ui on the verified Linux environment succeeds through upstream Glimpse without relying on the repo-local Linux helper as the primary runtime backend.",
       "steps": [
-        "From WSL2 Ubuntu 24 with WSLg and required build packages installed, perform a clean install of the package from the repo or git source.",
-        "Verify install exits 0 and does not print `EBADPLATFORM`.",
-        "Verify the Linux helper binary exists at the documented package-local path and is executable."
+        "From the verified Linux environment, perform a clean install of the package from the repo with the current migration changes applied.",
+        "Verify install exits 0, does not print `EBADPLATFORM`, and leaves the package using upstream Glimpse artifacts rather than the repo-local `native/linux/bin` helper as the primary runtime path.",
+        "Verify `npm pack --dry-run` succeeds and package contents match the Glimpse-first architecture instead of the helper-first architecture."
       ],
       "passes": true,
-      "regression_notes": "2026-03-13: Clean Linux npm install succeeded from a no-node_modules state without EBADPLATFORM. postinstall built .pi/extensions/generative-ui/native/linux/bin/pi-generative-ui-linux-helper and helper --version/self-test reported gtk3+webkit2gtk-4.1 on this WSL environment."
+      "regression_notes": "2026-03-18: Verified install/package path now uses upstream glimpseui@0.5.1 on Linux with no EBADPLATFORM, Linux backend probe resolves to kind=glimpse, and npm pack --dry-run no longer ships .pi/extensions/generative-ui/native/linux/**. checkSupport() currently reports BACKEND_BINARY_MISSING with actionable upstream build guidance because the Glimpse host was not built in this environment."
     },
     {
       "category": "functional",
-      "description": "A headed interactive pi session can load the extension on Linux, open a native widget window, and receive a page message through `window.glimpse.send(...)`.",
+      "description": "On Linux, backend selection and support checks resolve to Glimpse and normalize Glimpse-specific module, host, display, and runtime failures into the extension's existing backend error contract.",
       "steps": [
-        "Launch a headed interactive `pi` session with this package loaded from the local repo path.",
+        "In the verified Linux environment, probe backend selection and verify the real runtime path resolves to the Glimpse backend instead of the repo-local Linux helper backend.",
+        "Verify `checkSupport()` returns success in a healthy Glimpse-ready Linux environment.",
+        "Exercise deterministic failure scenarios for missing or unresolvable Glimpse module/host, missing GUI bridge, and recognizable runtime dependency failures, then verify the reported backend error codes and remediation guidance are stable and actionable."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "A headed interactive pi session on the verified Linux environment can load the extension through Glimpse, open a native widget window, and receive a page message through `window.glimpse.send(...)`.",
+      "steps": [
+        "Launch a headed interactive `pi` session with this package loaded from the local repo path in the verified Linux environment.",
         "Submit a prompt that triggers `visualize_read_me` and `show_widget`.",
-        "Verify a native Linux widget window opens and remains visible while the pi session stays active.",
-        "Interact with the widget so it sends a JSON payload through `window.glimpse.send(...)`.",
-        "Verify the tool result shown in pi includes the returned payload."
+        "Verify a native Linux widget window opens through Glimpse while the pi session stays interactive, then interact with the widget so it sends a JSON payload through `window.glimpse.send(...)`.",
+        "Verify the tool result shown in pi includes the returned payload and that a second widget can open in the same session."
       ],
-      "passes": true,
-      "regression_notes": "2026-03-13: Verified item 2 in a headed interactive `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` session on DISPLAY=:99 after the ambient WSLg DISPLAY remained stale. `xwininfo -root -tree` showed the native `linux roundtrip` GTK/WebKit window while pi stayed interactive, and the tool result returned `messageData` = `{\"ok\":true,\"source\":\"xvfb-headed-pi\",\"backend\":\"linux-webview\"}` from `window.glimpse.send(...)`."
+      "passes": false,
+      "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "Streamed widget rendering updates appear incrementally in the headed pi session and finalize by executing deferred scripts once.",
+      "description": "Streamed `show_widget` rendering through Glimpse appears incrementally before final completion and executes deferred scripts exactly once.",
       "steps": [
-        "In the headed interactive `pi` session, submit a visual prompt that causes a streamed `show_widget` call with visible partial updates.",
-        "Verify the widget window appears before the tool call is fully complete.",
-        "Verify at least one intermediate DOM update is visible before final completion.",
-        "Verify the finalized widget executes its deferred scripts after the final payload arrives."
+        "In a headed interactive `pi` session, submit a visual prompt that causes a streamed `show_widget` call with visible partial updates.",
+        "Verify the widget window opens before the tool call is fully complete and that at least one intermediate DOM update is visible before final completion.",
+        "Verify the final streamed payload runs deferred scripts exactly once and that no second window is opened for the same streamed call."
       ],
-      "passes": true,
-      "regression_notes": "2026-03-13: Fixed streamed-window finalization so deferred scripts execute exactly once and execute() reuses an in-flight streamed window instead of re-sending the final payload. Verified in a headed `env DISPLAY=:101 pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` session: pi showed `show_widget stream probe` while still working, `xwininfo -root -tree` showed the native window before completion, ImageMagick captures on the live Xvfb display changed between shot1/shot2 (`compare -metric AE` = 877) before stabilizing at shot3 (`diff23=0`), and the returned widget payload reported `scriptRuns:1`, `finalStatus:\"finalized\"`, `rowCount:48`."
+      "passes": false,
+      "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "Widget lifecycle resolution on Linux preserves manual close and abort behavior.",
+      "description": "Widget lifecycle and prompt bridging through Glimpse preserve manual close, abort, timeout, and `sendPrompt(...)` / `follow_up_prompt` behavior without introducing background persistence.",
       "steps": [
-        "Open a widget that does not immediately send a page message.",
-        "Manually close the widget window and verify pi reports the expected close result.",
-        "Open another widget, abort the active tool from pi, and verify the widget closes.",
-        "Verify no orphan helper process remains after each resolution path."
+        "Open a widget that does not immediately send a page message, manually close the window, and verify pi reports the expected close result.",
+        "Open another widget, abort the active tool from pi, and verify the widget closes cleanly with the expected abort result and no orphaned runtime process.",
+        "Open a widget that calls `sendPrompt(...)` or `window.glimpse.send({ type: 'follow_up_prompt', prompt: '...' })`, then verify the current tool result reports the queued prompt and pi proceeds with that prompt after the tool resolves."
       ],
-      "passes": true,
-      "regression_notes": "2026-03-13: Fixed aborted streamed-widget cleanup so assistant aborts close any in-flight Linux window before execute, and verified lifecycle semantics on Xvfb DISPLAY=:103. Manual close in a headed interactive `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` session returned `Window closed by user.` with no remaining helper process; a separate headed Linux `pi --mode rpc` run aborted immediately after `tool_execution_start` returned `details.closedReason = \"Aborted.\"`, removed the native `rpc abort verify` window, and left no orphan helper."
+      "passes": false,
+      "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "Linux diagnostics clearly distinguish missing display, missing helper binary, and missing runtime prerequisites.",
+      "description": "Package metadata, documentation, and production code paths reflect a strict Glimpse-first Linux architecture with no production dependence on the repo-local helper.",
       "steps": [
-        "Exercise the extension with `DISPLAY` and `WAYLAND_DISPLAY` unavailable and verify the reported error names the missing GUI display.",
-        "Exercise the extension with the Linux helper binary missing or non-executable and verify the reported error names that specific condition.",
-        "Exercise the extension in a missing runtime/dependency scenario and verify the reported error includes actionable remediation guidance."
+        "Review package metadata, backend code, and install/runtime logic after the migration changes.",
+        "Verify the repo-local Linux helper is no longer part of the production Linux runtime path or documented install workflow.",
+        "Verify README and package metadata accurately describe the verified Linux support claim, Glimpse-based prerequisites, and headed interactive validation workflow."
       ],
-      "passes": true,
-      "regression_notes": "2026-03-13: Hardened Linux diagnostics to avoid hanging display probes, added helper-path override support for fault injection, and verified `WSLG_REQUIRED` with DISPLAY unset, `BACKEND_BINARY_MISSING`, `BACKEND_BINARY_NOT_EXECUTABLE`, and `WEBKIT_RUNTIME_MISSING` plus remediation guidance via backend.checkSupport()."
-    },
-    {
-      "category": "functional",
-      "description": "Package metadata and documentation describe Linux/WSLg support, installation requirements, and verification workflow without breaking existing pi package behavior.",
-      "steps": [
-        "Review package metadata and README after the change.",
-        "Verify the documented install path matches how pi packages are loaded and installed.",
-        "Verify Linux prerequisites and the headed interactive pi verification workflow are documented for WSL2 + WSLg users."
-      ],
-      "passes": true,
-      "regression_notes": "2026-03-13: Updated package metadata and README for Linux/WSLg support, documented `pi install git:github.com/Michaelliv/pi-generative-ui` plus headed local validation via `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui`, and narrowed published package contents with a `files` whitelist verified by npm pack --dry-run."
-    },
-    {
-      "category": "functional",
-      "description": "The macOS Glimpse backend path remains intact and is regression-checked through a mocked Glimpse adapter harness when no real macOS environment is available.",
-      "steps": [
-        "Build a Linux-runnable fallback verification path that forces backend selection to the Glimpse adapter through explicit test-only environment overrides.",
-        "Verify mocked Glimpse backend selection, support checks, open/send/close adapter semantics, and page-message event wiring without requiring a native macOS window.",
-        "Verify missing Glimpse dependency diagnostics stay actionable when the adapter cannot resolve its backend module."
-      ],
-      "passes": true,
-      "regression_notes": "2026-03-13: User confirmed no macOS environment is available, so the execution bundle was recalibrated to a Linux-runnable fallback. Added test-only platform/module overrides plus scripts/verify-glimpse-fallback.js, then verified mocked Glimpse backend selection, adapter open/send/close semantics, message event wiring, and BACKEND_START_FAILED diagnostics alongside npm install and npm pack --dry-run."
+      "passes": false,
+      "regression_notes": ""
     }
   ]
 }
