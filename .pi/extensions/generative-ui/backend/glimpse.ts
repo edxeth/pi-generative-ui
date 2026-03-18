@@ -183,6 +183,19 @@ function linuxLayerShellRepoNote(missingDeps = missingLinuxBuildDeps()): string 
   return null;
 }
 
+function linuxLayerShellRepoFix(missingDeps = missingLinuxBuildDeps()): string | null {
+  if (!missingDeps.some((dep) => dep.pkgConfig === LINUX_GTK4_LAYER_SHELL_PKG_CONFIG)) {
+    return null;
+  }
+
+  const layerShellState = ubuntuLayerShellRepoState();
+  if (layerShellState === "gtk3-only" || layerShellState === "missing") {
+    return `Ubuntu 24 / WSL2 cannot satisfy ${LINUX_GTK4_LAYER_SHELL_PKG_CONFIG} from the default apt repos in this environment. Use a Linux distro or repo that ships GTK4 layer-shell support, or point GLIMPSE_BINARY_PATH / GLIMPSE_HOST_PATH at a prebuilt upstream Glimpse host.`;
+  }
+
+  return null;
+}
+
 function linuxBuildFixes(): string[] {
   const fixes: string[] = [];
 
@@ -205,6 +218,11 @@ function linuxBuildFixes(): string[] {
   const layerShellRepoNote = linuxLayerShellRepoNote(missingDeps);
   if (layerShellRepoNote) {
     fixes.push(layerShellRepoNote);
+  }
+
+  const layerShellRepoFix = linuxLayerShellRepoFix(missingDeps);
+  if (layerShellRepoFix) {
+    fixes.push(layerShellRepoFix);
   }
 
   const legacyRuntimeNote = legacyLinuxRuntimeNote(missingDeps);

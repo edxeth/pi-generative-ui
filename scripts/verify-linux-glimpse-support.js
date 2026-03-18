@@ -105,6 +105,19 @@ function linuxLayerShellRepoNote(missingDeps) {
   return null;
 }
 
+function linuxLayerShellRepoFix(missingDeps) {
+  if (!missingDeps.some((dep) => dep.pkgConfig === linuxGtk4LayerShellPkgConfig)) {
+    return null;
+  }
+
+  const layerShellState = ubuntuLayerShellRepoState();
+  if (layerShellState === "gtk3-only" || layerShellState === "missing") {
+    return `Ubuntu 24 / WSL2 cannot satisfy ${linuxGtk4LayerShellPkgConfig} from the default apt repos in this environment. Use a Linux distro or repo that ships GTK4 layer-shell support, or point GLIMPSE_BINARY_PATH / GLIMPSE_HOST_PATH at a prebuilt upstream Glimpse host.`;
+  }
+
+  return null;
+}
+
 function detectedLegacyLinuxRuntimePackages() {
   const result = run("ldconfig", ["-p"]);
   if (result.status !== 0) {
@@ -132,6 +145,7 @@ const pkgConfigVersionCheck = run("pkg-config", ["--version"]);
 const missingDeps = missingLinuxDeps();
 const ubuntuLayerShellState = ubuntuLayerShellRepoState();
 const layerShellRepoNote = linuxLayerShellRepoNote(missingDeps);
+const layerShellRepoFix = linuxLayerShellRepoFix(missingDeps);
 const legacyLinuxRuntime = detectedLegacyLinuxRuntimePackages();
 const hasDisplay = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 const sudoCheck = run("sudo", ["-n", "true"]);
@@ -201,6 +215,9 @@ if (!support.ok) {
   }
   if (layerShellRepoNote) {
     nextSteps.push(layerShellRepoNote);
+  }
+  if (layerShellRepoFix) {
+    nextSteps.push(layerShellRepoFix);
   }
   if (legacyLinuxRuntime.length > 0 && missingDeps.some((dep) => dep.pkgConfig === "webkitgtk-6.0")) {
     nextSteps.push(`This machine still exposes legacy ${legacyLinuxRuntime.join(" + ")} runtime libraries from the old helper-era stack; they do not satisfy upstream Glimpse's WebKitGTK 6.0 requirement.`);
