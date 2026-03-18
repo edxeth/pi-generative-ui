@@ -32,8 +32,8 @@
         "Verify a native Linux widget window opens through Glimpse while the pi session stays interactive, then interact with the widget so it sends a JSON payload through `window.glimpse.send(...)`.",
         "Verify the tool result shown in pi includes the returned payload and that a second widget can open in the same session."
       ],
-      "passes": false,
-      "regression_notes": ""
+      "passes": true,
+      "regression_notes": "2026-03-18: Reran the mandatory repo-root gates (`npm install`, `npm pack --dry-run`, `tsc --noEmit --module es2022 --moduleResolution bundler --target es2022 --skipLibCheck .pi/extensions/generative-ui/index.ts .pi/extensions/generative-ui/backend/*.ts`, `tsc --allowJs --checkJs --noEmit scripts/*.js`, `node --check scripts/*.js`) plus the Linux backend probes (`backend.kind` => `glimpse`, real `checkSupport()` => `{ ok: true }`). Then verified the headed interactive acceptance flow in a real `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` hands-free session: prompt 1 triggered `visualize_read_me` + `show_widget` and returned `messageData` `{\"ok\":true,\"test\":\"roundtrip-1\"}` from `window.glimpse.send(...)`; prompt 2 in the same session opened a second widget and returned `{\"ok\":true,\"test\":\"roundtrip-2\"}`."
     },
     {
       "category": "functional",
