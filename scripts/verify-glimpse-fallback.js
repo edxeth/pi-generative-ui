@@ -310,7 +310,7 @@ process.exit(0);
         expectReasonIncludes(support, output, "pkg-config still cannot find webkitgtk-6.0, gtk4-layer-shell-0");
         expectReasonIncludes(support, output, "Ubuntu 24 apt exposes only libgtk-layer-shell-dev");
         expectReasonExcludes(support, output, "See README for install instructions");
-        expectFixIncludes(support, output, "libwebkitgtk-6.0-dev");
+        expectFixIncludes(support, output, "Install the available Ubuntu 24 / WSL2 packages first: sudo apt install -y libwebkitgtk-6.0-dev.");
         expectFixIncludes(support, output, "Ubuntu 24 apt exposes only libgtk-layer-shell-dev");
         expectFixIncludes(support, output, "default apt repos in this environment");
         expectFixIncludes(support, output, "GLIMPSE_BINARY_PATH / GLIMPSE_HOST_PATH");

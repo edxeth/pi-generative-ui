@@ -166,6 +166,21 @@ function ubuntuLinuxBuildPackages(missingDeps = missingLinuxBuildDeps()): string
   }))];
 }
 
+function ubuntuLinuxBuildFix(missingDeps = missingLinuxBuildDeps()): string | null {
+  const ubuntuPackages = ubuntuLinuxBuildPackages(missingDeps);
+  if (ubuntuPackages.length === 0) {
+    return null;
+  }
+
+  const missingLayerShell = missingDeps.some((dep) => dep.pkgConfig === LINUX_GTK4_LAYER_SHELL_PKG_CONFIG);
+  const layerShellState = ubuntuLayerShellRepoState();
+  if (missingLayerShell && (layerShellState === "gtk3-only" || layerShellState === "missing")) {
+    return `Install the available Ubuntu 24 / WSL2 packages first: sudo apt install -y ${ubuntuPackages.join(" ")}. Default apt repos in this environment still do not provide ${LINUX_GTK4_LAYER_SHELL_PKG_CONFIG}.`;
+  }
+
+  return `Ubuntu 24 / WSL2 packages: sudo apt install -y ${ubuntuPackages.join(" ")}.`;
+}
+
 function linuxLayerShellRepoNote(missingDeps = missingLinuxBuildDeps()): string | null {
   if (!missingDeps.some((dep) => dep.pkgConfig === LINUX_GTK4_LAYER_SHELL_PKG_CONFIG)) {
     return null;
@@ -208,9 +223,9 @@ function linuxBuildFixes(): string[] {
     fixes.push("Install pkg-config so Glimpse can detect the Linux GTK/WebKit development packages.");
   }
   if (missingDeps.length > 0) {
-    const ubuntuPackages = ubuntuLinuxBuildPackages(missingDeps);
-    if (ubuntuPackages.length > 0) {
-      fixes.push(`Ubuntu 24 / WSL2 packages: sudo apt install -y ${ubuntuPackages.join(" ")}.`);
+    const ubuntuFix = ubuntuLinuxBuildFix(missingDeps);
+    if (ubuntuFix) {
+      fixes.push(ubuntuFix);
     }
     fixes.push(`Fedora packages: sudo dnf install ${missingDeps.map((dep) => dep.fedora).join(" ")}. Arch packages: sudo pacman -S ${missingDeps.map((dep) => dep.arch).join(" ")}.`);
   }
