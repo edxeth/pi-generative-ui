@@ -51,7 +51,9 @@ function glimpseBuildFixes(platform: string): string[] {
   if (platform === "linux") {
     return [
       "Install Rust from https://rustup.rs so upstream Glimpse can build its Linux host.",
-      "Install the GTK4/WebKitGTK 6 development packages required by upstream Glimpse, then rerun npm install or npm run build:linux inside node_modules/glimpseui.",
+      "Ubuntu 24 / WSL2 packages: sudo apt install -y libgtk-4-dev libwebkitgtk-6.0-dev libgtk4-layer-shell-dev.",
+      "Fedora packages: sudo dnf install gtk4-devel webkitgtk6.0-devel gtk4-layer-shell-devel. Arch packages: sudo pacman -S gtk4 webkitgtk-6.0 gtk4-layer-shell.",
+      "After the packages are present, rerun npm install or npm run build:linux inside node_modules/glimpseui.",
       isWSL() ? "WSLg must be enabled for the supported WSL2 Linux GUI path." : "Run inside a GUI-capable Linux session.",
     ];
   }
