@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -69,6 +69,11 @@ export function open(html, options) {
   writeFileSync(logPath, "", "utf8");
 }
 
+function createHostScript(hostPath, body, mode = 0o755) {
+  writeFileSync(hostPath, `#!/usr/bin/env node\n${body}\n`, "utf8");
+  chmodSync(hostPath, mode);
+}
+
 function compileBackend(outDir) {
   requireSuccess("tsc", [
     "--module", "es2022",
@@ -78,6 +83,7 @@ function compileBackend(outDir) {
     "--outDir", outDir,
     ".pi/extensions/generative-ui/backend/index.ts",
     ".pi/extensions/generative-ui/backend/glimpse.ts",
+    ".pi/extensions/generative-ui/backend/errors.ts",
     ".pi/extensions/generative-ui/backend/types.ts",
   ]);
 }
@@ -92,15 +98,72 @@ function runNodeSnippet(source, env) {
   return result.stdout.trim();
 }
 
+function expectSupportScenario(glimpsePath, env, validate, label) {
+  const output = runNodeSnippet(
+    `
+      import { GlimpseBackend } from ${JSON.stringify(pathToFileUrl(glimpsePath))};
+
+      const backend = new GlimpseBackend();
+      const support = await backend.checkSupport();
+      console.log(JSON.stringify(support));
+    `,
+    env,
+  );
+
+  const support = JSON.parse(output);
+  validate(support, output);
+  process.stdout.write(`✓ ${label}\n`);
+}
+
+function expectCode(support, output, code) {
+  if (support.ok !== false || support.code !== code) {
+    throw new Error(`Unexpected diagnostic for ${code}: ${output}`);
+  }
+}
+
 async function main() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "pi-glimpse-fallback-"));
   const compiledDir = path.join(tempDir, "compiled");
   const mockModulePath = path.join(tempDir, "glimpse-mock.mjs");
   const logPath = path.join(tempDir, "glimpse-log.jsonl");
+  const readyHostPath = path.join(tempDir, "glimpse-ready-host.mjs");
+  const runtimeFailHostPath = path.join(tempDir, "glimpse-runtime-fail-host.mjs");
+  const genericFailHostPath = path.join(tempDir, "glimpse-generic-fail-host.mjs");
+  const nonExecHostPath = path.join(tempDir, "glimpse-nonexec-host.mjs");
 
   try {
     compileBackend(compiledDir);
     createMockModule(mockModulePath, logPath);
+    createHostScript(
+      readyHostPath,
+      `
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdin.setEncoding("utf8");
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  if (buffer.includes('"type":"close"') || buffer.includes('"type": "close"')) {
+    process.exit(0);
+  }
+});
+setTimeout(() => process.exit(0), 1500);
+`,
+    );
+    createHostScript(
+      runtimeFailHostPath,
+      `
+process.stderr.write("error while loading shared libraries: libwebkitgtk-6.0.so: cannot open shared object file\\n");
+process.exit(127);
+`,
+    );
+    createHostScript(
+      genericFailHostPath,
+      `
+process.stderr.write("glimpse exploded in a generic way\\n");
+process.exit(1);
+`,
+    );
+    createHostScript(nonExecHostPath, "process.exit(0);", 0o644);
 
     const indexPath = path.join(compiledDir, "index.js");
     const glimpsePath = path.join(compiledDir, "glimpse.js");
@@ -129,9 +192,12 @@ async function main() {
         console.log(JSON.stringify({ kind: backend.kind, support, message, closed }));
       `,
       {
-        PI_GENERATIVE_UI_TEST_PLATFORM: "darwin",
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
         PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: readyHostPath,
         PI_GENERATIVE_UI_GLIMPSE_LOG: logPath,
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
       },
     );
 
@@ -145,34 +211,115 @@ async function main() {
     if (!events.includes("open") || !events.includes("send") || !events.includes("close")) {
       throw new Error(`Expected mock Glimpse open/send/close events, got ${JSON.stringify(logEntries)}`);
     }
-    process.stdout.write("✓ mocked Glimpse adapter contract\n");
+    process.stdout.write("✓ mocked Glimpse Linux adapter contract\n");
 
-    const missingOutput = runNodeSnippet(
-      `
-        import { GlimpseBackend } from ${JSON.stringify(pathToFileUrl(glimpsePath))};
-
-        const backend = new GlimpseBackend();
-        const support = await backend.checkSupport();
-        console.log(JSON.stringify(support));
-      `,
+    expectSupportScenario(
+      glimpsePath,
       {
-        PI_GENERATIVE_UI_TEST_PLATFORM: "darwin",
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
         PI_GENERATIVE_UI_GLIMPSE_MODULE: path.join(tempDir, "missing-glimpse.mjs"),
+        GLIMPSE_BINARY_PATH: readyHostPath,
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
       },
+      (support, output) => {
+        expectCode(support, output, "BACKEND_BINARY_MISSING");
+        if (!Array.isArray(support.fixes) || !support.fixes.some((fix) => String(fix).includes("npm install"))) {
+          throw new Error(`Missing npm install guidance: ${output}`);
+        }
+      },
+      "missing Glimpse module diagnostics",
     );
 
-    const missing = JSON.parse(missingOutput);
-    if (
-      missing.ok !== false
-      || missing.code !== "BACKEND_START_FAILED"
-      || !Array.isArray(missing.fixes)
-      || !missing.fixes.some((fix) => String(fix).includes("npm install"))
-    ) {
-      throw new Error(`Unexpected missing-module diagnostic: ${missingOutput}`);
-    }
-    process.stdout.write("✓ missing Glimpse dependency diagnostics\n");
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_TEST_WSL: "0",
+        DISPLAY: "",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "NO_GUI_DISPLAY");
+      },
+      "missing Linux display diagnostics",
+    );
 
-    process.stdout.write("Mocked Glimpse fallback verification passed.\n");
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_TEST_WSL: "1",
+        DISPLAY: "",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "WSLG_REQUIRED");
+      },
+      "missing WSLg diagnostics",
+    );
+
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: path.join(tempDir, "missing-glimpse-host"),
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "BACKEND_BINARY_MISSING");
+      },
+      "missing Glimpse host diagnostics",
+    );
+
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: nonExecHostPath,
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "BACKEND_BINARY_NOT_EXECUTABLE");
+      },
+      "non-executable Glimpse host diagnostics",
+    );
+
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: runtimeFailHostPath,
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "WEBKIT_RUNTIME_MISSING");
+      },
+      "Linux GTK/WebKit runtime diagnostics",
+    );
+
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: genericFailHostPath,
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "BACKEND_START_FAILED");
+      },
+      "generic Glimpse startup diagnostics",
+    );
+
+    process.stdout.write("Mocked Glimpse backend verification passed.\n");
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

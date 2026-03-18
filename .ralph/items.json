@@ -21,7 +21,7 @@
         "Exercise deterministic failure scenarios for missing or unresolvable Glimpse module/host, missing GUI bridge, and recognizable runtime dependency failures, then verify the reported backend error codes and remediation guidance are stable and actionable."
       ],
       "passes": false,
-      "regression_notes": ""
+      "regression_notes": "2026-03-18: Hardened .pi/extensions/generative-ui/backend/glimpse.ts to normalize Linux Glimpse module/host/display/runtime/startup failures, added a Linux host startup probe plus PI_GENERATIVE_UI_TEST_WSL override for deterministic diagnostics, and updated scripts/verify-glimpse-fallback.js to cover mock success plus missing-module, NO_GUI_DISPLAY, WSLG_REQUIRED, missing-host, non-executable-host, WEBKIT_RUNTIME_MISSING, and generic BACKEND_START_FAILED scenarios. Verified with npm install, npm pack --dry-run, TypeScript/script checks, backend kind => glimpse, real checkSupport() => BACKEND_BINARY_MISSING with actionable upstream build guidance, and node scripts/verify-glimpse-fallback.js => pass. Item remains failing only because this environment still lacks GTK4/WebKitGTK dev packages, so upstream Glimpse cannot be built here and the required real healthy Linux { ok: true } support check could not be verified."
     },
     {
       "category": "functional",
