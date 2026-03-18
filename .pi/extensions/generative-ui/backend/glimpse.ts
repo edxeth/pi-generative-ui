@@ -77,6 +77,37 @@ function missingLinuxBuildDeps() {
   });
 }
 
+function detectedLegacyLinuxRuntimePackages(): string[] {
+  const override = process.env.PI_GENERATIVE_UI_TEST_LEGACY_LINUX_RUNTIME;
+  if (override != null) {
+    return override.split(",").map((value) => value.trim()).filter(Boolean);
+  }
+
+  const result = spawnSync("ldconfig", ["-p"], { stdio: "pipe", env: process.env, encoding: "utf8" });
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  const detected: string[] = [];
+  if (output.includes("libwebkit2gtk-4.1.so")) detected.push("WebKitGTK 4.1");
+  if (output.includes("libjavascriptcoregtk-4.1.so")) detected.push("JavaScriptCoreGTK 4.1");
+  return detected;
+}
+
+function legacyLinuxRuntimeNote(missingDeps = missingLinuxBuildDeps()): string | null {
+  if (!missingDeps.some((dep) => dep.pkgConfig === "webkitgtk-6.0")) {
+    return null;
+  }
+
+  const detected = detectedLegacyLinuxRuntimePackages();
+  if (detected.length === 0) {
+    return null;
+  }
+
+  return `Detected legacy ${detected.join(" + ")} runtime libraries from the old helper-era stack, but upstream Glimpse requires WebKitGTK 6.0 instead.`;
+}
+
 function linuxBuildFixes(): string[] {
   const fixes: string[] = [];
 
@@ -91,6 +122,11 @@ function linuxBuildFixes(): string[] {
   if (missingDeps.length > 0) {
     fixes.push(`Ubuntu 24 / WSL2 packages: sudo apt install -y ${missingDeps.map((dep) => dep.ubuntu).join(" ")}.`);
     fixes.push(`Fedora packages: sudo dnf install ${missingDeps.map((dep) => dep.fedora).join(" ")}. Arch packages: sudo pacman -S ${missingDeps.map((dep) => dep.arch).join(" ")}.`);
+  }
+
+  const legacyRuntimeNote = legacyLinuxRuntimeNote(missingDeps);
+  if (legacyRuntimeNote) {
+    fixes.push(legacyRuntimeNote);
   }
 
   fixes.push("After the prerequisites are present, rerun npm install or npm run build:linux inside node_modules/glimpseui.");
@@ -209,11 +245,35 @@ function missingModuleError(platform: string, modulePath: string): BackendSuppor
   );
 }
 
+function linuxMissingHostDetails(skippedBuildReason?: string | null): string | null {
+  const details: string[] = [];
+
+  if (skippedBuildReason) {
+    details.push(skippedBuildReason);
+  }
+
+  const missingDeps = missingLinuxBuildDeps();
+  if (missingDeps.length > 0) {
+    details.push(`pkg-config still cannot find ${missingDeps.map((dep) => dep.pkgConfig).join(", ")}.`);
+  }
+
+  const legacyRuntimeNote = legacyLinuxRuntimeNote(missingDeps);
+  if (legacyRuntimeNote) {
+    details.push(legacyRuntimeNote);
+  }
+
+  return details.join(" ").trim() || null;
+}
+
 function missingHostError(platform: string, hostPath: string, skippedBuildReason?: string | null): BackendSupportError {
+  const details = platform === "linux"
+    ? linuxMissingHostDetails(skippedBuildReason)
+    : skippedBuildReason;
+
   return supportError(
     "BACKEND_BINARY_MISSING",
-    skippedBuildReason
-      ? `Missing upstream Glimpse host at ${hostPath}. ${skippedBuildReason}`
+    details
+      ? `Missing upstream Glimpse host at ${hostPath}. ${details}`
       : `Missing upstream Glimpse host at ${hostPath}.`,
     glimpseBuildFixes(platform),
   );

@@ -133,6 +133,12 @@ function expectFixExcludes(support, output, fragment) {
   }
 }
 
+function expectReasonIncludes(support, output, fragment) {
+  if (!String(support.reason ?? "").includes(fragment)) {
+    throw new Error(`Expected reason containing ${JSON.stringify(fragment)}: ${output}`);
+  }
+}
+
 async function main() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "pi-glimpse-fallback-"));
   const compiledDir = path.join(tempDir, "compiled");
@@ -277,6 +283,7 @@ process.exit(1);
         PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
         PI_GENERATIVE_UI_TEST_COMMAND_CARGO: "1",
         PI_GENERATIVE_UI_TEST_MISSING_LINUX_PKG_CONFIG: "webkitgtk-6.0,gtk4-layer-shell-0",
+        PI_GENERATIVE_UI_TEST_LEGACY_LINUX_RUNTIME: "WebKitGTK 4.1,JavaScriptCoreGTK 4.1",
         PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
         GLIMPSE_BINARY_PATH: path.join(tempDir, "missing-glimpse-host"),
         DISPLAY: ":99",
@@ -284,7 +291,9 @@ process.exit(1);
       },
       (support, output) => {
         expectCode(support, output, "BACKEND_BINARY_MISSING");
+        expectReasonIncludes(support, output, "pkg-config still cannot find webkitgtk-6.0, gtk4-layer-shell-0");
         expectFixIncludes(support, output, "libwebkitgtk-6.0-dev libgtk4-layer-shell-dev");
+        expectFixIncludes(support, output, "legacy WebKitGTK 4.1 + JavaScriptCoreGTK 4.1 runtime libraries");
         expectFixExcludes(support, output, "libgtk-4-dev");
         expectFixExcludes(support, output, "Install Rust from https://rustup.rs");
       },

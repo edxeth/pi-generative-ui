@@ -59,6 +59,19 @@ function missingLinuxDeps() {
   return linuxDeps.filter((dep) => run("pkg-config", ["--exists", dep.pkgConfig]).status !== 0);
 }
 
+function detectedLegacyLinuxRuntimePackages() {
+  const result = run("ldconfig", ["-p"]);
+  if (result.status !== 0) {
+    return [];
+  }
+
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  const detected = [];
+  if (output.includes("libwebkit2gtk-4.1.so")) detected.push("WebKitGTK 4.1");
+  if (output.includes("libjavascriptcoregtk-4.1.so")) detected.push("JavaScriptCoreGTK 4.1");
+  return detected;
+}
+
 const modulePath = resolveGlimpseModulePath();
 const packageRoot = path.dirname(path.dirname(modulePath));
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
@@ -71,6 +84,7 @@ const hostPath = resolveHostPath(modulePath);
 const cargoCheck = run("cargo", ["--version"]);
 const pkgConfigVersionCheck = run("pkg-config", ["--version"]);
 const missingDeps = missingLinuxDeps();
+const legacyLinuxRuntime = detectedLegacyLinuxRuntimePackages();
 const hasDisplay = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 const sudoCheck = run("sudo", ["-n", "true"]);
 const hostExists = existsSync(hostPath);
@@ -91,6 +105,7 @@ log(`display=${hasDisplay ? (process.env.WAYLAND_DISPLAY || process.env.DISPLAY)
 log(`cargo=${cargoCheck.status === 0 ? (cargoCheck.stdout.trim() || cargoCheck.stderr.trim() || "present") : "missing"}`);
 log(`pkgConfig=${pkgConfigVersionCheck.status === 0 ? (pkgConfigVersionCheck.stdout.trim() || "present") : "missing"}`);
 log(`pkgConfigLinuxDeps=${missingDeps.length === 0 ? "ok" : `missing:${missingDeps.map((dep) => dep.pkgConfig).join(",")}`}`);
+log(`legacyLinuxRuntime=${legacyLinuxRuntime.length === 0 ? "none" : legacyLinuxRuntime.join(",")}`);
 log(`sudo=${sudoCheck.status === 0 ? "passwordless" : "password-required-or-missing"}`);
 log(`hostExists=${hostExists}`);
 log(`hostExecutable=${hostExecutable}`);
@@ -124,6 +139,9 @@ if (!support.ok) {
   }
   if (missingDeps.length > 0) {
     nextSteps.push(`Install Ubuntu 24 / WSL2 build packages: sudo apt install -y ${missingDeps.map((dep) => dep.ubuntu).join(" ")}.`);
+  }
+  if (legacyLinuxRuntime.length > 0 && missingDeps.some((dep) => dep.pkgConfig === "webkitgtk-6.0")) {
+    nextSteps.push(`This machine still exposes legacy ${legacyLinuxRuntime.join(" + ")} runtime libraries from the old helper-era stack; they do not satisfy upstream Glimpse's WebKitGTK 6.0 requirement.`);
   }
   if (sudoCheck.status !== 0 && missingDeps.length > 0) {
     nextSteps.push("This environment does not currently have passwordless sudo, so the missing system packages cannot be installed autonomously here.");
