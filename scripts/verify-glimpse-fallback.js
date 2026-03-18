@@ -121,6 +121,18 @@ function expectCode(support, output, code) {
   }
 }
 
+function expectFixIncludes(support, output, fragment) {
+  if (!Array.isArray(support.fixes) || !support.fixes.some((fix) => String(fix).includes(fragment))) {
+    throw new Error(`Expected fix containing ${JSON.stringify(fragment)}: ${output}`);
+  }
+}
+
+function expectFixExcludes(support, output, fragment) {
+  if (Array.isArray(support.fixes) && support.fixes.some((fix) => String(fix).includes(fragment))) {
+    throw new Error(`Did not expect fix containing ${JSON.stringify(fragment)}: ${output}`);
+  }
+}
+
 async function main() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "pi-glimpse-fallback-"));
   const compiledDir = path.join(tempDir, "compiled");
@@ -263,6 +275,8 @@ process.exit(1);
       glimpsePath,
       {
         PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_TEST_COMMAND_CARGO: "1",
+        PI_GENERATIVE_UI_TEST_MISSING_LINUX_PKG_CONFIG: "webkitgtk-6.0,gtk4-layer-shell-0",
         PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
         GLIMPSE_BINARY_PATH: path.join(tempDir, "missing-glimpse-host"),
         DISPLAY: ":99",
@@ -270,6 +284,9 @@ process.exit(1);
       },
       (support, output) => {
         expectCode(support, output, "BACKEND_BINARY_MISSING");
+        expectFixIncludes(support, output, "libwebkitgtk-6.0-dev libgtk4-layer-shell-dev");
+        expectFixExcludes(support, output, "libgtk-4-dev");
+        expectFixExcludes(support, output, "Install Rust from https://rustup.rs");
       },
       "missing Glimpse host diagnostics",
     );

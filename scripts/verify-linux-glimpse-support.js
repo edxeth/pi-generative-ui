@@ -46,6 +46,19 @@ function runTsxSnippet(source) {
   return result.stdout.trim();
 }
 
+const linuxDeps = [
+  { pkgConfig: "gtk4", ubuntu: "libgtk-4-dev" },
+  { pkgConfig: "webkitgtk-6.0", ubuntu: "libwebkitgtk-6.0-dev" },
+  { pkgConfig: "gtk4-layer-shell-0", ubuntu: "libgtk4-layer-shell-dev" },
+];
+
+function missingLinuxDeps() {
+  if (run("pkg-config", ["--version"]).status !== 0) {
+    return linuxDeps;
+  }
+  return linuxDeps.filter((dep) => run("pkg-config", ["--exists", dep.pkgConfig]).status !== 0);
+}
+
 const modulePath = resolveGlimpseModulePath();
 const packageRoot = path.dirname(path.dirname(modulePath));
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
@@ -56,8 +69,10 @@ const skippedBuildReason = existsSync(skippedBuildPath)
 const hostPath = resolveHostPath(modulePath);
 
 const cargoCheck = run("cargo", ["--version"]);
-const pkgConfigCheck = run("pkg-config", ["--exists", "webkitgtk-6.0", "gtk4", "gtk4-layer-shell-0"]);
+const pkgConfigVersionCheck = run("pkg-config", ["--version"]);
+const missingDeps = missingLinuxDeps();
 const hasDisplay = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+const sudoCheck = run("sudo", ["-n", "true"]);
 const hostExists = existsSync(hostPath);
 let hostExecutable = false;
 if (hostExists) {
@@ -74,7 +89,9 @@ log(`modulePath=${modulePath}`);
 log(`hostPath=${hostPath}`);
 log(`display=${hasDisplay ? (process.env.WAYLAND_DISPLAY || process.env.DISPLAY) : "<missing>"}`);
 log(`cargo=${cargoCheck.status === 0 ? (cargoCheck.stdout.trim() || cargoCheck.stderr.trim() || "present") : "missing"}`);
-log(`pkgConfigLinuxDeps=${pkgConfigCheck.status === 0 ? "ok" : "missing"}`);
+log(`pkgConfig=${pkgConfigVersionCheck.status === 0 ? (pkgConfigVersionCheck.stdout.trim() || "present") : "missing"}`);
+log(`pkgConfigLinuxDeps=${missingDeps.length === 0 ? "ok" : `missing:${missingDeps.map((dep) => dep.pkgConfig).join(",")}`}`);
+log(`sudo=${sudoCheck.status === 0 ? "passwordless" : "password-required-or-missing"}`);
 log(`hostExists=${hostExists}`);
 log(`hostExecutable=${hostExecutable}`);
 if (skippedBuildReason) {
@@ -102,8 +119,14 @@ if (!support.ok) {
   if (cargoCheck.status !== 0) {
     nextSteps.push("Install Rust from https://rustup.rs.");
   }
-  if (pkgConfigCheck.status !== 0) {
-    nextSteps.push("Install Ubuntu 24 / WSL2 build packages: sudo apt install -y libgtk-4-dev libwebkitgtk-6.0-dev libgtk4-layer-shell-dev.");
+  if (pkgConfigVersionCheck.status !== 0) {
+    nextSteps.push("Install pkg-config so the upstream Glimpse build can detect Linux GTK/WebKit development packages.");
+  }
+  if (missingDeps.length > 0) {
+    nextSteps.push(`Install Ubuntu 24 / WSL2 build packages: sudo apt install -y ${missingDeps.map((dep) => dep.ubuntu).join(" ")}.`);
+  }
+  if (sudoCheck.status !== 0 && missingDeps.length > 0) {
+    nextSteps.push("This environment does not currently have passwordless sudo, so the missing system packages cannot be installed autonomously here.");
   }
   if (!hostExists || !hostExecutable || skippedBuildReason) {
     nextSteps.push("After prerequisites are present, run: npm --prefix node_modules/glimpseui run build:linux");
