@@ -127,7 +127,7 @@ function linuxLayerShellRepoFix(missingDeps) {
 
   const layerShellState = ubuntuLayerShellRepoState();
   if (layerShellState === "gtk3-only" || layerShellState === "missing") {
-    return `Ubuntu 24 / WSL2 cannot satisfy ${linuxGtk4LayerShellPkgConfig} from the default apt repos in this environment. Use a Linux distro or repo that ships GTK4 layer-shell support, or point GLIMPSE_BINARY_PATH / GLIMPSE_HOST_PATH at a prebuilt upstream Glimpse host.`;
+    return `Ubuntu 24 / WSL2 cannot satisfy ${linuxGtk4LayerShellPkgConfig} from the default apt repos in this environment. The current upstream glimpseui build:linux hint still mentions ${ubuntuGtk4LayerShellPackage}, but that package is not available here. Use a Linux distro or repo that ships GTK4 layer-shell support, or point GLIMPSE_BINARY_PATH / GLIMPSE_HOST_PATH at a prebuilt upstream Glimpse host.`;
   }
 
   return null;

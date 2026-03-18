@@ -313,9 +313,10 @@ process.exit(0);
         expectFixIncludes(support, output, "Install the available Ubuntu 24 / WSL2 packages first: sudo apt install -y libwebkitgtk-6.0-dev.");
         expectFixIncludes(support, output, "Ubuntu 24 apt exposes only libgtk-layer-shell-dev");
         expectFixIncludes(support, output, "default apt repos in this environment");
+        expectFixIncludes(support, output, "build:linux hint still mentions libgtk4-layer-shell-dev");
         expectFixIncludes(support, output, "GLIMPSE_BINARY_PATH / GLIMPSE_HOST_PATH");
         expectFixIncludes(support, output, "legacy WebKitGTK 4.1 + JavaScriptCoreGTK 4.1 runtime libraries");
-        expectFixExcludes(support, output, "libgtk4-layer-shell-dev");
+        expectFixExcludes(support, output, "sudo apt install -y libgtk4-layer-shell-dev");
         expectFixExcludes(support, output, "libgtk-4-dev");
         expectFixExcludes(support, output, "Install Rust from https://rustup.rs");
       },
