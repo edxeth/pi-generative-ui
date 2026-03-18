@@ -358,7 +358,12 @@ function linuxMissingHostDetails(skippedBuildReason?: string | null): string | n
 
   const missingDeps = missingLinuxBuildDeps();
   if (missingDeps.length > 0) {
-    details.push(`pkg-config still cannot find ${missingDeps.map((dep) => dep.pkgConfig).join(", ")}.`);
+    const missingPkgConfigs = missingDeps.map((dep) => dep.pkgConfig).join(", ");
+    if (!commandAvailable("pkg-config")) {
+      details.push(`pkg-config is unavailable, so Glimpse cannot verify the Linux prerequisites (${missingPkgConfigs}).`);
+    } else {
+      details.push(`pkg-config still cannot find ${missingPkgConfigs}.`);
+    }
   }
 
   const layerShellRepoNote = linuxLayerShellRepoNote(missingDeps);

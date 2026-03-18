@@ -324,6 +324,27 @@ process.exit(0);
       glimpsePath,
       {
         PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_TEST_COMMAND_CARGO: "1",
+        PI_GENERATIVE_UI_TEST_COMMAND_PKG_CONFIG: "0",
+        PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: path.join(tempDir, "missing-glimpse-host-pkg-config"),
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "BACKEND_BINARY_MISSING");
+        expectReasonIncludes(support, output, "pkg-config is unavailable, so Glimpse cannot verify the Linux prerequisites (gtk4, webkitgtk-6.0, gtk4-layer-shell-0).");
+        expectReasonExcludes(support, output, "pkg-config still cannot find");
+        expectFixIncludes(support, output, "Install pkg-config so Glimpse can detect the Linux GTK/WebKit development packages.");
+        expectFixIncludes(support, output, "Fedora packages: sudo dnf install gtk4-devel webkitgtk6.0-devel gtk4-layer-shell-devel. Arch packages: sudo pacman -S gtk4 webkitgtk-6.0 gtk4-layer-shell.");
+      },
+      "missing pkg-config diagnostics",
+    );
+
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
         PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
         GLIMPSE_BINARY_PATH: nonExecHostPath,
         DISPLAY: ":99",
