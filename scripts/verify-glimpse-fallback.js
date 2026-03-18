@@ -177,7 +177,7 @@ setTimeout(() => process.exit(0), 1500);
     createHostScript(
       runtimeFailHostPath,
       `
-process.stderr.write("error while loading shared libraries: libwebkitgtk-6.0.so: cannot open shared object file\\n");
+process.stderr.write("error while loading shared libraries: libwebkitgtk-6.0.so: cannot open shared object file: No such file or directory\\n");
 process.exit(127);
 `,
     );

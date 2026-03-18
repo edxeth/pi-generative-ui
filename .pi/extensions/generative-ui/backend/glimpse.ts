@@ -324,10 +324,10 @@ function isMissingModuleFailure(message: string): boolean {
 
 function isMissingHostFailure(message: string): boolean {
   const lower = message.toLowerCase();
+  const runtimeDependencyFailure = isRuntimeDependencyFailure(message);
   return (
     lower.includes("glimpse host not found")
-    || lower.includes("enoent")
-    || lower.includes("no such file or directory")
+    || (!runtimeDependencyFailure && (lower.includes("enoent") || lower.includes("no such file or directory")))
   );
 }
 
