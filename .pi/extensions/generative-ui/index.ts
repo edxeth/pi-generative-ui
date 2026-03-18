@@ -128,6 +128,7 @@ export default function (pi: ExtensionAPI) {
     ready: boolean;
     opening: Promise<WidgetWindow> | null;
     placeholderApplied: boolean;
+    delayedFinalPending: boolean;
     title: string;
     width: number;
     height: number;
@@ -202,6 +203,98 @@ export default function (pi: ExtensionAPI) {
 </div>`;
   }
 
+  function applyStreamingPlaceholder(streamState: StreamingWidget, force = false) {
+    if (streamState.placeholderApplied || streamState.finalApplied) return false;
+    if (!force && (streamState.lastHTML || streamState.finalHTML)) return false;
+    if (sendStreamingContent(streamState, streamingPlaceholderHTML())) {
+      streamState.placeholderApplied = true;
+      return true;
+    }
+    return false;
+  }
+
+  function attachStreamingReadyHandler(streamState: StreamingWidget, win: WidgetWindow) {
+    win.on("ready", () => {
+      if (streaming !== streamState) {
+        try { win.close(); } catch {}
+        return;
+      }
+      streamState.ready = true;
+      setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "generating");
+
+      const shouldForcePlaceholder = !!streamState.finalHTML
+        && streamState.lastHTML === streamState.finalHTML
+        && !streamState.finalApplied;
+      if (applyStreamingPlaceholder(streamState, shouldForcePlaceholder)) {
+        if (shouldForcePlaceholder) {
+          streamState.delayedFinalPending = true;
+          setTimeout(() => {
+            streamState.delayedFinalPending = false;
+            flushStreamingContent(streamState);
+          }, 50);
+          return;
+        }
+      }
+
+      flushStreamingContent(streamState);
+    });
+  }
+
+  async function startStreamingOpen(streamState: StreamingWidget) {
+    if (streamState.window) return streamState.window;
+    if (!streamState.opening) {
+      setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "opening");
+      streamState.opening = (async () => {
+        const win = await openWidgetWindow(shellHTML(), {
+          title: streamState.title,
+          width: streamState.width,
+          height: streamState.height,
+          floating: streamState.floating,
+        });
+        if (streaming !== streamState) {
+          try { win.close(); } catch {}
+          throw new Error("Stale streaming window.");
+        }
+        streamState.window = win;
+        attachStreamingReadyHandler(streamState, win);
+        return win;
+      })();
+
+      try {
+        const win = await streamState.opening;
+        streamState.opening = null;
+        return win;
+      } catch (error) {
+        streamState.opening = null;
+        throw error;
+      }
+    }
+    return await streamState.opening;
+  }
+
+  async function waitForStreamingReady(streamState: StreamingWidget, win: WidgetWindow) {
+    if (streamState.ready) return;
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      win.on("ready", finish);
+      win.on("closed", () => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("Streaming window closed before reporting ready."));
+      });
+      win.on("error", (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+  }
+
   function queueStreamingOpen(streamState: StreamingWidget) {
     if (streamState.updateTimer) return;
     streamState.updateTimer = setTimeout(async () => {
@@ -209,49 +302,15 @@ export default function (pi: ExtensionAPI) {
 
       try {
         if (!streamState.window && !streamState.opening) {
-          setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "opening");
-          streamState.opening = openWidgetWindow(shellHTML(), {
-            title: streamState.title,
-            width: streamState.width,
-            height: streamState.height,
-            floating: streamState.floating,
-          });
-
-          const win = await streamState.opening;
-          if (streaming !== streamState) {
-            try { win.close(); } catch {}
-            return;
-          }
-
-          streamState.window = win;
-          streamState.opening = null;
-
-          win.on("ready", () => {
-            if (streaming !== streamState) {
-              try { win.close(); } catch {}
-              return;
-            }
-            streamState.ready = true;
-            setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "generating");
-            if (!streamState.placeholderApplied && !streamState.lastHTML && !streamState.finalHTML) {
-              sendStreamingContent(streamState, streamingPlaceholderHTML());
-              streamState.placeholderApplied = true;
-            }
-            flushStreamingContent(streamState);
-          });
+          await startStreamingOpen(streamState);
           return;
         }
 
         if (streamState.window && streamState.ready) {
-          if (!streamState.placeholderApplied && !streamState.lastHTML && !streamState.finalHTML) {
-            sendStreamingContent(streamState, streamingPlaceholderHTML());
-            streamState.placeholderApplied = true;
-          }
+          applyStreamingPlaceholder(streamState);
           flushStreamingContent(streamState);
         }
-      } catch {
-        streamState.opening = null;
-      }
+      } catch {}
     }, 150);
   }
 
@@ -320,6 +379,7 @@ export default function (pi: ExtensionAPI) {
           ready: false,
           opening: null,
           placeholderApplied: false,
+          delayedFinalPending: false,
           title: normalizeWidgetTitle(args.title ?? "Widget"),
           width: args.width ?? 800,
           height: args.height ?? 600,
@@ -488,11 +548,18 @@ export default function (pi: ExtensionAPI) {
       };
 
       const streamState = streaming;
-      if (streamState?.window || streamState?.opening) {
-        win = streamState.window ?? await streamState.opening!;
-        streamState.window = win;
+      if (streamState) {
+        if (streamState.updateTimer) {
+          clearTimeout(streamState.updateTimer);
+          streamState.updateTimer = null;
+        }
         streamState.finalHTML = streamState.finalHTML ?? code;
-        flushStreamingContent(streamState);
+        win = streamState.window ?? await startStreamingOpen(streamState);
+        await waitForStreamingReady(streamState, win);
+        streamState.window = win;
+        if (!streamState.delayedFinalPending) {
+          flushStreamingContent(streamState);
+        }
         setWidgetTerminalStatus(title, width, height, "ready");
         emitPartialStatus("ready");
         streaming = null;
