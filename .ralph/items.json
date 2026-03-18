@@ -44,7 +44,7 @@
         "Verify the final streamed payload runs deferred scripts exactly once and that no second window is opened for the same streamed call."
       ],
       "passes": false,
-      "regression_notes": ""
+      "regression_notes": "2026-03-18: Tried to harden item 4 by updating `.pi/extensions/generative-ui/index.ts` so streamed windows pre-open from `toolcall_start`, show a shell placeholder, survive `toolcall_end` timer races, and expose shell metrics as `window.piGenerativeUiStreamingMetrics` / `window.__PI_GENERATIVE_UI_STREAMING_METRICS__`. Mandatory repo-root gates still passed (`npm install`, `npm pack --dry-run`, `tsc --noEmit --module es2022 --moduleResolution bundler --target es2022 --skipLibCheck .pi/extensions/generative-ui/index.ts .pi/extensions/generative-ui/backend/*.ts`, `tsc --allowJs --checkJs --noEmit scripts/*.js`, `node --check scripts/*.js`, backend kind => `glimpse`, real `checkSupport()` => `{ ok: true }`). In real headed `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` sessions, the probe widgets rendered and returned `widgetScriptRuns: 1`, but `contentUpdates` / `scriptRuns` stayed `null`, which indicates the real runtime path still did not expose the streamed shell page to the final widget script. Because the headed session evidence still does not prove early window open + intermediate DOM update + single-window streamed reuse, item 4 remains failing."
     },
     {
       "category": "functional",

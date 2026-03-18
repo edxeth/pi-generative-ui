@@ -51,8 +51,11 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 <script>
   window._morphReady = false;
   window._pending = null;
+  window.piGenerativeUiStreamingMetrics = { contentUpdates: 0, scriptRuns: 0 };
+  window.__PI_GENERATIVE_UI_STREAMING_METRICS__ = window.piGenerativeUiStreamingMetrics;
   window._setContent = function(html) {
     if (!window._morphReady) { window._pending = html; return; }
+    window.__PI_GENERATIVE_UI_STREAMING_METRICS__.contentUpdates += 1;
     var root = document.getElementById('root');
     var target = document.createElement('div');
     target.id = 'root';
@@ -71,6 +74,7 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
     });
   };
   window._runScripts = function() {
+    window.__PI_GENERATIVE_UI_STREAMING_METRICS__.scriptRuns += 1;
     document.querySelectorAll('#root script').forEach(function(old) {
       var s = document.createElement('script');
       if (old.src) { s.src = old.src; } else { s.textContent = old.textContent; }
@@ -123,6 +127,7 @@ export default function (pi: ExtensionAPI) {
     updateTimer: NodeJS.Timeout | null;
     ready: boolean;
     opening: Promise<WidgetWindow> | null;
+    placeholderApplied: boolean;
     title: string;
     width: number;
     height: number;
@@ -190,6 +195,66 @@ export default function (pi: ExtensionAPI) {
     return false;
   }
 
+  function streamingPlaceholderHTML() {
+    return `<div style="display:grid;gap:0.75rem;min-height:220px;align-content:start">
+<div style="font-size:0.95rem;opacity:0.7;letter-spacing:0.08em;text-transform:uppercase">Generating widget</div>
+<div style="padding:1rem 1.1rem;border-radius:16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08)">Streaming content into the native window…</div>
+</div>`;
+  }
+
+  function queueStreamingOpen(streamState: StreamingWidget) {
+    if (streamState.updateTimer) return;
+    streamState.updateTimer = setTimeout(async () => {
+      streamState.updateTimer = null;
+
+      try {
+        if (!streamState.window && !streamState.opening) {
+          setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "opening");
+          streamState.opening = openWidgetWindow(shellHTML(), {
+            title: streamState.title,
+            width: streamState.width,
+            height: streamState.height,
+            floating: streamState.floating,
+          });
+
+          const win = await streamState.opening;
+          if (streaming !== streamState) {
+            try { win.close(); } catch {}
+            return;
+          }
+
+          streamState.window = win;
+          streamState.opening = null;
+
+          win.on("ready", () => {
+            if (streaming !== streamState) {
+              try { win.close(); } catch {}
+              return;
+            }
+            streamState.ready = true;
+            setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "generating");
+            if (!streamState.placeholderApplied && !streamState.lastHTML && !streamState.finalHTML) {
+              sendStreamingContent(streamState, streamingPlaceholderHTML());
+              streamState.placeholderApplied = true;
+            }
+            flushStreamingContent(streamState);
+          });
+          return;
+        }
+
+        if (streamState.window && streamState.ready) {
+          if (!streamState.placeholderApplied && !streamState.lastHTML && !streamState.finalHTML) {
+            sendStreamingContent(streamState, streamingPlaceholderHTML());
+            streamState.placeholderApplied = true;
+          }
+          flushStreamingContent(streamState);
+        }
+      } catch {
+        streamState.opening = null;
+      }
+    }, 150);
+  }
+
   async function closeStreamingWindow(streamState: StreamingWidget | null) {
     if (!streamState) return;
     if (streamState.updateTimer) {
@@ -245,7 +310,7 @@ export default function (pi: ExtensionAPI) {
       const block = partial?.content?.[raw.contentIndex];
       if (block?.type === "toolCall" && block?.name === "show_widget") {
         const args = block.arguments ?? {};
-        streaming = {
+        const streamState: StreamingWidget = {
           contentIndex: raw.contentIndex,
           window: null,
           lastHTML: "",
@@ -254,12 +319,15 @@ export default function (pi: ExtensionAPI) {
           updateTimer: null,
           ready: false,
           opening: null,
+          placeholderApplied: false,
           title: normalizeWidgetTitle(args.title ?? "Widget"),
           width: args.width ?? 800,
           height: args.height ?? 600,
           floating: args.floating ?? false,
         };
-        setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "preparing");
+        streaming = streamState;
+        setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "preparing");
+        queueStreamingOpen(streamState);
       }
       return;
     }
@@ -277,47 +345,7 @@ export default function (pi: ExtensionAPI) {
       streaming.height = args.height ?? streaming.height;
       streaming.floating = args.floating ?? streaming.floating;
       setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "generating");
-
-      if (streaming.updateTimer) return;
-      const streamState = streaming;
-      streaming.updateTimer = setTimeout(async () => {
-        streamState.updateTimer = null;
-
-        try {
-          if (!streamState.window && !streamState.opening) {
-            setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "opening");
-            streamState.opening = openWidgetWindow(shellHTML(), {
-              title: streamState.title,
-              width: streamState.width,
-              height: streamState.height,
-              floating: streamState.floating,
-            });
-
-            const win = await streamState.opening;
-            if (streaming !== streamState) {
-              try { win.close(); } catch {}
-              return;
-            }
-
-            streamState.window = win;
-            streamState.opening = null;
-
-            win.on("ready", () => {
-              if (streaming !== streamState) {
-                try { win.close(); } catch {}
-                return;
-              }
-              streamState.ready = true;
-              setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "generating");
-              flushStreamingContent(streamState);
-            });
-          } else if (streamState.window && streamState.ready) {
-            flushStreamingContent(streamState);
-          }
-        } catch {
-          streamState.opening = null;
-        }
-      }, 150);
+      queueStreamingOpen(streaming);
       return;
     }
 
@@ -330,6 +358,9 @@ export default function (pi: ExtensionAPI) {
       const toolCall = raw.toolCall;
       if (toolCall?.arguments?.widget_code) {
         streaming.finalHTML = toolCall.arguments.widget_code;
+        if (!streaming.window && !streaming.opening) {
+          queueStreamingOpen(streaming);
+        }
         flushStreamingContent(streaming);
         setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "ready");
       }
