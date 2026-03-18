@@ -117,6 +117,7 @@ export default function (pi: ExtensionAPI) {
   const backend = getWidgetBackend();
   let hasSeenReadMe = false;
   let activeWindows: WidgetWindow[] = [];
+  let activeWidgetRuns: Array<() => void> = [];
 
   interface StreamingWidget {
     contentIndex: number;
@@ -348,6 +349,14 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  function abortActiveWidgetRuns() {
+    const runs = activeWidgetRuns;
+    activeWidgetRuns = [];
+    for (const abort of runs) {
+      try { abort(); } catch {}
+    }
+  }
+
   async function openWidgetWindow(html: string, options: { title: string; width: number; height: number; floating?: boolean }) {
     await ensureSupport();
     const win = await backend.open(html, options);
@@ -431,6 +440,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_end", async (event) => {
     const message: any = event.message;
     if (message?.role === "assistant" && message?.stopReason === "aborted") {
+      abortActiveWidgetRuns();
       await abandonStreamingWindow(streaming);
     }
   });
@@ -586,6 +596,11 @@ export default function (pi: ExtensionAPI) {
         let followUpPrompt: string | null = null;
         let followUpReplyMode: "followUp" | "steer" | null = null;
         let resolved = false;
+        const abortRun = () => {
+          try { win?.close(); } catch {}
+          finish("Aborted.");
+        };
+        activeWidgetRuns.push(abortRun);
         const timeout = setTimeout(() => {
           finish("Widget still open (timed out waiting for interaction).");
         }, 120_000);
@@ -594,6 +609,7 @@ export default function (pi: ExtensionAPI) {
           if (resolved) return;
           resolved = true;
           clearTimeout(timeout);
+          activeWidgetRuns = activeWidgetRuns.filter((run) => run !== abortRun);
           clearWidgetTerminalStatus();
           activeWindows = activeWindows.filter((window) => window !== win);
           resolve({
@@ -648,10 +664,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         if (signal) {
-          signal.addEventListener("abort", () => {
-            try { win?.close(); } catch {}
-            finish("Aborted.");
-          }, { once: true });
+          signal.addEventListener("abort", abortRun, { once: true });
         }
       });
     },
@@ -722,6 +735,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     if (streaming?.updateTimer) clearTimeout(streaming.updateTimer);
     streaming = null;
+    abortActiveWidgetRuns();
     clearWidgetTerminalStatus();
     for (const win of activeWindows) {
       try { win.close(); } catch {}

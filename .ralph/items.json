@@ -55,7 +55,7 @@
         "Open a widget that calls `sendPrompt(...)` or `window.glimpse.send({ type: 'follow_up_prompt', prompt: '...' })`, then verify the current tool result reports the queued prompt and pi proceeds with that prompt after the tool resolves."
       ],
       "passes": false,
-      "regression_notes": ""
+      "regression_notes": "2026-03-18: manual close and follow-up prompt bridging passed in headed pi sessions, but headed abort acceptance is still not verified. Added a fallback that aborts active widget runs on assistant message_end stopReason=aborted so non-streaming windows no longer rely only on the tool signal path; baseline gates stayed green. Real pi abort injection via interactive_shell still timed out instead of producing the expected Aborted result, so this item remains failing until abort is proven end-to-end with no orphaned Glimpse process."
     },
     {
       "category": "functional",
