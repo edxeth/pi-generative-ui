@@ -178,6 +178,10 @@ if (kind.kind !== "glimpse") {
   fail(`Expected backend kind=glimpse, got ${kindOutput}`);
 }
 
+if (String(support.reason ?? "").includes("See README for install instructions")) {
+  fail(`checkSupport() leaked misleading upstream README guidance: ${supportOutput}`);
+}
+
 if (!support.ok) {
   const nextSteps = [];
   if (!hasDisplay) {

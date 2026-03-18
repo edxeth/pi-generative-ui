@@ -245,9 +245,29 @@ function resolveGlimpseHostPath(modulePath: string): string {
 }
 
 function readSkippedBuildReason(modulePath: string): string | null {
+  const override = process.env.PI_GENERATIVE_UI_TEST_GLIMPSE_SKIPPED_BUILD_REASON;
+  if (override != null) return override.trim() || null;
+
   const skippedBuildPath = join(resolveGlimpsePackageRoot(modulePath), ".glimpse-build-skipped");
   if (!existsSync(skippedBuildPath)) return null;
   return readFileSync(skippedBuildPath, "utf8").trim() || null;
+}
+
+function normalizeSkippedBuildReason(platform: string, skippedBuildReason?: string | null): string | null {
+  if (!skippedBuildReason) return null;
+
+  if (platform !== "linux") {
+    return skippedBuildReason;
+  }
+
+  const trimmed = skippedBuildReason.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.includes("GTK4/WebKit2GTK dev packages are missing")) {
+    return "Postinstall skipped native build because the Linux GTK4/WebKitGTK 6.0 prerequisites are missing or unavailable in this environment.";
+  }
+
+  return trimmed.replace(/See README for install instructions,?\s*/i, "").trim() || null;
 }
 
 function missingDependencyFixes(platform: string): string[] {
@@ -331,8 +351,9 @@ function missingModuleError(platform: string, modulePath: string): BackendSuppor
 function linuxMissingHostDetails(skippedBuildReason?: string | null): string | null {
   const details: string[] = [];
 
-  if (skippedBuildReason) {
-    details.push(skippedBuildReason);
+  const normalizedSkippedBuildReason = normalizeSkippedBuildReason("linux", skippedBuildReason);
+  if (normalizedSkippedBuildReason) {
+    details.push(normalizedSkippedBuildReason);
   }
 
   const missingDeps = missingLinuxBuildDeps();
@@ -356,7 +377,7 @@ function linuxMissingHostDetails(skippedBuildReason?: string | null): string | n
 function missingHostError(platform: string, hostPath: string, skippedBuildReason?: string | null): BackendSupportError {
   const details = platform === "linux"
     ? linuxMissingHostDetails(skippedBuildReason)
-    : skippedBuildReason;
+    : normalizeSkippedBuildReason(platform, skippedBuildReason);
 
   return supportError(
     "BACKEND_BINARY_MISSING",

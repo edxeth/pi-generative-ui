@@ -139,6 +139,12 @@ function expectReasonIncludes(support, output, fragment) {
   }
 }
 
+function expectReasonExcludes(support, output, fragment) {
+  if (String(support.reason ?? "").includes(fragment)) {
+    throw new Error(`Did not expect reason containing ${JSON.stringify(fragment)}: ${output}`);
+  }
+}
+
 async function main() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "pi-glimpse-fallback-"));
   const compiledDir = path.join(tempDir, "compiled");
@@ -292,6 +298,7 @@ process.exit(0);
         PI_GENERATIVE_UI_TEST_MISSING_LINUX_PKG_CONFIG: "webkitgtk-6.0,gtk4-layer-shell-0",
         PI_GENERATIVE_UI_TEST_UBUNTU_LAYER_SHELL_STATE: "gtk3-only",
         PI_GENERATIVE_UI_TEST_LEGACY_LINUX_RUNTIME: "WebKitGTK 4.1,JavaScriptCoreGTK 4.1",
+        PI_GENERATIVE_UI_TEST_GLIMPSE_SKIPPED_BUILD_REASON: "Postinstall skipped native build because GTK4/WebKit2GTK dev packages are missing. See README for install instructions, then run npm run build:linux.",
         PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
         GLIMPSE_BINARY_PATH: path.join(tempDir, "missing-glimpse-host"),
         DISPLAY: ":99",
@@ -299,8 +306,10 @@ process.exit(0);
       },
       (support, output) => {
         expectCode(support, output, "BACKEND_BINARY_MISSING");
+        expectReasonIncludes(support, output, "Postinstall skipped native build because the Linux GTK4/WebKitGTK 6.0 prerequisites are missing or unavailable in this environment.");
         expectReasonIncludes(support, output, "pkg-config still cannot find webkitgtk-6.0, gtk4-layer-shell-0");
         expectReasonIncludes(support, output, "Ubuntu 24 apt exposes only libgtk-layer-shell-dev");
+        expectReasonExcludes(support, output, "See README for install instructions");
         expectFixIncludes(support, output, "libwebkitgtk-6.0-dev");
         expectFixIncludes(support, output, "Ubuntu 24 apt exposes only libgtk-layer-shell-dev");
         expectFixIncludes(support, output, "legacy WebKitGTK 4.1 + JavaScriptCoreGTK 4.1 runtime libraries");
