@@ -9,10 +9,13 @@ import type { BackendSupportError, BackendSupportOk, WidgetBackend } from "./typ
 
 const requireFromHere = createRequire(import.meta.url);
 const PROBE_TIMEOUT_MS = 4000;
+const LINUX_GTK4_LAYER_SHELL_PKG_CONFIG = "gtk4-layer-shell-0";
+const UBUNTU_GTK4_LAYER_SHELL_PACKAGE = "libgtk4-layer-shell-dev";
+const UBUNTU_GTK3_LAYER_SHELL_PACKAGE = "libgtk-layer-shell-dev";
 const LINUX_BUILD_DEPS = [
   { pkgConfig: "gtk4", ubuntu: "libgtk-4-dev", fedora: "gtk4-devel", arch: "gtk4" },
   { pkgConfig: "webkitgtk-6.0", ubuntu: "libwebkitgtk-6.0-dev", fedora: "webkitgtk6.0-devel", arch: "webkitgtk-6.0" },
-  { pkgConfig: "gtk4-layer-shell-0", ubuntu: "libgtk4-layer-shell-dev", fedora: "gtk4-layer-shell-devel", arch: "gtk4-layer-shell" },
+  { pkgConfig: LINUX_GTK4_LAYER_SHELL_PKG_CONFIG, ubuntu: UBUNTU_GTK4_LAYER_SHELL_PACKAGE, fedora: "gtk4-layer-shell-devel", arch: "gtk4-layer-shell" },
 ] as const;
 
 let glimpseModule: { open: (html: string, options: Record<string, unknown>) => any } | null = null;
@@ -58,6 +61,46 @@ function commandAvailable(command: string, args: string[] = ["--version"]): bool
   if (override === "0") return false;
   const result = spawnSync(command, args, { stdio: "pipe", env: process.env });
   return !result.error && result.status === 0;
+}
+
+function isUbuntuLike(): boolean {
+  const override = process.env.PI_GENERATIVE_UI_TEST_UBUNTU_LIKE;
+  if (override === "1") return true;
+  if (override === "0") return false;
+  try {
+    return /(^|\n)(ID|ID_LIKE)=.*ubuntu/i.test(readFileSync("/etc/os-release", "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+function aptPackageHasCandidate(pkg: string): boolean | null {
+  if (!isUbuntuLike() || !commandAvailable("apt-cache")) {
+    return null;
+  }
+
+  const result = spawnSync("apt-cache", ["show", pkg], { stdio: "pipe", env: process.env, encoding: "utf8" });
+  if (result.error) {
+    return null;
+  }
+
+  return Boolean((result.stdout ?? "").trim());
+}
+
+function ubuntuLayerShellRepoState(): "gtk4" | "gtk3-only" | "missing" | "unknown" | null {
+  const override = process.env.PI_GENERATIVE_UI_TEST_UBUNTU_LAYER_SHELL_STATE;
+  if (override === "gtk4" || override === "gtk3-only" || override === "missing" || override === "unknown") {
+    return override;
+  }
+
+  const gtk4Candidate = aptPackageHasCandidate(UBUNTU_GTK4_LAYER_SHELL_PACKAGE);
+  const gtk3Candidate = aptPackageHasCandidate(UBUNTU_GTK3_LAYER_SHELL_PACKAGE);
+
+  if (gtk4Candidate === true) return "gtk4";
+  if (gtk4Candidate === false && gtk3Candidate === true) return "gtk3-only";
+  if (gtk4Candidate === false && gtk3Candidate === false) return "missing";
+  if (gtk4Candidate == null && gtk3Candidate == null) return null;
+  return "unknown";
 }
 
 function missingLinuxBuildDeps() {
@@ -108,6 +151,38 @@ function legacyLinuxRuntimeNote(missingDeps = missingLinuxBuildDeps()): string |
   return `Detected legacy ${detected.join(" + ")} runtime libraries from the old helper-era stack, but upstream Glimpse requires WebKitGTK 6.0 instead.`;
 }
 
+function ubuntuLinuxBuildPackages(missingDeps = missingLinuxBuildDeps()): string[] {
+  const layerShellState = ubuntuLayerShellRepoState();
+  return [...new Set(missingDeps.flatMap((dep) => {
+    if (dep.pkgConfig !== LINUX_GTK4_LAYER_SHELL_PKG_CONFIG) {
+      return dep.ubuntu;
+    }
+
+    if (layerShellState === "gtk4") {
+      return dep.ubuntu;
+    }
+
+    return [];
+  }))];
+}
+
+function linuxLayerShellRepoNote(missingDeps = missingLinuxBuildDeps()): string | null {
+  if (!missingDeps.some((dep) => dep.pkgConfig === LINUX_GTK4_LAYER_SHELL_PKG_CONFIG)) {
+    return null;
+  }
+
+  const layerShellState = ubuntuLayerShellRepoState();
+  if (layerShellState === "gtk3-only") {
+    return `Ubuntu 24 apt exposes only ${UBUNTU_GTK3_LAYER_SHELL_PACKAGE} (GTK3 / gtk-layer-shell-0); it does not satisfy upstream Glimpse's GTK4 layer-shell requirement (${LINUX_GTK4_LAYER_SHELL_PKG_CONFIG}).`;
+  }
+
+  if (layerShellState === "missing") {
+    return `Ubuntu 24 apt does not expose a ${UBUNTU_GTK4_LAYER_SHELL_PACKAGE} package for ${LINUX_GTK4_LAYER_SHELL_PKG_CONFIG} in this environment.`;
+  }
+
+  return null;
+}
+
 function linuxBuildFixes(): string[] {
   const fixes: string[] = [];
 
@@ -120,8 +195,16 @@ function linuxBuildFixes(): string[] {
     fixes.push("Install pkg-config so Glimpse can detect the Linux GTK/WebKit development packages.");
   }
   if (missingDeps.length > 0) {
-    fixes.push(`Ubuntu 24 / WSL2 packages: sudo apt install -y ${missingDeps.map((dep) => dep.ubuntu).join(" ")}.`);
+    const ubuntuPackages = ubuntuLinuxBuildPackages(missingDeps);
+    if (ubuntuPackages.length > 0) {
+      fixes.push(`Ubuntu 24 / WSL2 packages: sudo apt install -y ${ubuntuPackages.join(" ")}.`);
+    }
     fixes.push(`Fedora packages: sudo dnf install ${missingDeps.map((dep) => dep.fedora).join(" ")}. Arch packages: sudo pacman -S ${missingDeps.map((dep) => dep.arch).join(" ")}.`);
+  }
+
+  const layerShellRepoNote = linuxLayerShellRepoNote(missingDeps);
+  if (layerShellRepoNote) {
+    fixes.push(layerShellRepoNote);
   }
 
   const legacyRuntimeNote = legacyLinuxRuntimeNote(missingDeps);
@@ -255,6 +338,11 @@ function linuxMissingHostDetails(skippedBuildReason?: string | null): string | n
   const missingDeps = missingLinuxBuildDeps();
   if (missingDeps.length > 0) {
     details.push(`pkg-config still cannot find ${missingDeps.map((dep) => dep.pkgConfig).join(", ")}.`);
+  }
+
+  const layerShellRepoNote = linuxLayerShellRepoNote(missingDeps);
+  if (layerShellRepoNote) {
+    details.push(layerShellRepoNote);
   }
 
   const legacyRuntimeNote = legacyLinuxRuntimeNote(missingDeps);
