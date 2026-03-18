@@ -397,7 +397,7 @@ async function probeLinuxHost(hostPath: string): Promise<BackendSupportOk | Back
 
     child.on("exit", (code, signal) => {
       if (settled) return;
-      if (sawReady || code === 0) {
+      if (sawReady) {
         finish({ ok: true as const });
         return;
       }
@@ -406,7 +406,9 @@ async function probeLinuxHost(hostPath: string): Promise<BackendSupportOk | Back
       finish(
         normalizeGlimpseFailure(
           "linux",
-          combined || `Upstream Glimpse support probe failed (code=${code}, signal=${signal}).`,
+          combined || (code === 0
+            ? "Upstream Glimpse support probe exited before reporting ready."
+            : `Upstream Glimpse support probe failed (code=${code}, signal=${signal}).`),
           { hostPath },
         ),
       );

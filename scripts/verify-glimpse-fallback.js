@@ -147,6 +147,7 @@ async function main() {
   const readyHostPath = path.join(tempDir, "glimpse-ready-host.mjs");
   const runtimeFailHostPath = path.join(tempDir, "glimpse-runtime-fail-host.mjs");
   const genericFailHostPath = path.join(tempDir, "glimpse-generic-fail-host.mjs");
+  const prematureExitHostPath = path.join(tempDir, "glimpse-premature-exit-host.mjs");
   const nonExecHostPath = path.join(tempDir, "glimpse-nonexec-host.mjs");
 
   try {
@@ -179,6 +180,12 @@ process.exit(127);
       `
 process.stderr.write("glimpse exploded in a generic way\\n");
 process.exit(1);
+`,
+    );
+    createHostScript(
+      prematureExitHostPath,
+      `
+process.exit(0);
 `,
     );
     createHostScript(nonExecHostPath, "process.exit(0);", 0o644);
@@ -328,6 +335,22 @@ process.exit(1);
         expectCode(support, output, "WEBKIT_RUNTIME_MISSING");
       },
       "Linux GTK/WebKit runtime diagnostics",
+    );
+
+    expectSupportScenario(
+      glimpsePath,
+      {
+        PI_GENERATIVE_UI_TEST_PLATFORM: "linux",
+        PI_GENERATIVE_UI_GLIMPSE_MODULE: mockModulePath,
+        GLIMPSE_BINARY_PATH: prematureExitHostPath,
+        DISPLAY: ":99",
+        WAYLAND_DISPLAY: "",
+      },
+      (support, output) => {
+        expectCode(support, output, "BACKEND_START_FAILED");
+        expectReasonIncludes(support, output, "exited before reporting ready");
+      },
+      "premature Glimpse probe exit diagnostics",
     );
 
     expectSupportScenario(
