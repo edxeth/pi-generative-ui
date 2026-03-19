@@ -117,7 +117,7 @@ What you should see:
 This repo is intentionally small.
 
 ```text
-src/generative-ui/
+src/
 ├── index.ts              # extension runtime, streaming, lifecycle, tool rendering
 ├── backend/              # Glimpse adapter + support diagnostics
 ├── guidelines.ts         # extracted design guidance
