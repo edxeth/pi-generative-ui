@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { getGuidelines, AVAILABLE_MODULES } from "./guidelines.js";
+import { SVG_STYLES } from "./svg-styles.js";
 import { getWidgetBackend, formatSupportError, type WidgetWindow } from "./backend/index.js";
 
 interface FollowUpPromptMessage {
@@ -46,6 +47,7 @@ function shellHTML(): string {
 *{box-sizing:border-box}
 body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;}
 @keyframes _fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+${SVG_STYLES}
 </style>
 </head><body><div id="root"></div>
 <script>
@@ -91,14 +93,14 @@ ${widgetBridgeScript()}
 // Wrap HTML fragment into a full document for non-streaming fallback.
 function wrapHTML(code: string, isSVG = false): string {
   if (isSVG) {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${SVG_STYLES}</style></head>
 <body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1a1a1a;color:#e0e0e0;">
 ${code}
 ${widgetBridgeScript()}</body></html>`;
   }
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<style>*{box-sizing:border-box}body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0}</style>
+<style>*{box-sizing:border-box}body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0}${SVG_STYLES}</style>
 </head><body>${code}
 ${widgetBridgeScript()}</body></html>`;
 }
