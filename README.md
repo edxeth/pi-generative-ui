@@ -20,7 +20,7 @@ If the model wants a chart, a calculator, a diagram, or a tiny app, it can build
 ## Install
 
 ```bash
-pi install git:github.com/Michaelliv/pi-generative-ui
+pi install git:github.com/edxeth/pi-generative-ui
 ```
 
 Or test the local repo directly:
@@ -135,6 +135,10 @@ Linux and macOS both go through upstream Glimpse.
 ## Why this package exists
 
 Claude’s generative UI is one of the best parts of the product. This package brings that interaction model to pi without requiring a browser tab: native windows, live streaming, and real bidirectional widget interaction.
+
+## Attribution
+
+This repository is a cleaned-up continuation of work originally developed in [`Michaelliv/pi-generative-ui`](https://github.com/Michaelliv/pi-generative-ui), with the final runtime simplified around upstream Glimpse and the legacy Linux helper removed.
 
 ## License
 
