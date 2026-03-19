@@ -45,18 +45,57 @@ function shellHTML(): string {
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <style>
 *{box-sizing:border-box}
-body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;}
+body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;position:relative;}
 @keyframes _fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+@keyframes _pulse{0%,100%{opacity:.45}50%{opacity:1}}
+#pi-loading{position:absolute;inset:1rem;display:none;align-items:stretch;justify-content:center;pointer-events:none;z-index:9999}
+#pi-loading[data-visible="1"]{display:flex}
+#pi-loading-panel{width:min(960px,100%);min-height:100%;border:1px solid rgba(255,255,255,.08);border-radius:18px;background:rgba(26,26,26,.88);padding:18px;display:grid;gap:14px}
+#pi-loading-title{font-size:.95rem;letter-spacing:.06em;text-transform:uppercase;opacity:.72}
+#pi-loading-subtitle{font-size:1rem;opacity:.9}
+#pi-loading-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+#pi-loading-chart-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:12px;min-height:320px}
+.pi-loading-card,.pi-loading-chart{border-radius:16px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.035);overflow:hidden;position:relative}
+.pi-loading-card{height:88px}.pi-loading-chart{min-height:320px}
+.pi-loading-card::before,.pi-loading-chart::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,255,255,.03),rgba(255,255,255,.12),rgba(255,255,255,.03));transform:translateX(-100%);animation:_fadeIn .3s ease both,_pulse 1.2s ease-in-out infinite}
+@media (max-width:900px){#pi-loading-grid,#pi-loading-chart-grid{grid-template-columns:minmax(0,1fr)}}
 ${SVG_STYLES}
 </style>
-</head><body><div id="root"></div>
+</head><body><div id="root"></div><div id="pi-loading" aria-hidden="true"><div id="pi-loading-panel"><div id="pi-loading-title">Loading interactive widget</div><div id="pi-loading-subtitle">Rendering charts, scripts, and controls…</div><div id="pi-loading-grid"><div class="pi-loading-card"></div><div class="pi-loading-card"></div><div class="pi-loading-card"></div><div class="pi-loading-card"></div></div><div id="pi-loading-chart-grid"><div class="pi-loading-chart"></div><div class="pi-loading-chart"></div></div></div></div>
 <script>
   window._morphReady = false;
   window._pending = null;
+  window._loadingTimer = null;
   window.piGenerativeUiStreamingMetrics = { contentUpdates: 0, scriptRuns: 0 };
   window.__PI_GENERATIVE_UI_STREAMING_METRICS__ = window.piGenerativeUiStreamingMetrics;
+  window._setLoading = function(visible, subtitle) {
+    var loading = document.getElementById('pi-loading');
+    var text = document.getElementById('pi-loading-subtitle');
+    if (!loading) return;
+    loading.dataset.visible = visible ? '1' : '0';
+    if (subtitle && text) text.textContent = subtitle;
+  };
+  window._scheduleLoading = function(subtitle) {
+    clearTimeout(window._loadingTimer);
+    window._loadingTimer = setTimeout(function() {
+      window._setLoading(true, subtitle || 'Rendering charts, scripts, and controls…');
+    }, 180);
+  };
+  window._hideLoading = function() {
+    clearTimeout(window._loadingTimer);
+    window._setLoading(false);
+  };
+  window._needsLoading = function(html) {
+    if (typeof html !== 'string') return false;
+    return /<script[\s>]/i.test(html) || /<canvas[\s>]/i.test(html);
+  };
   window._setContent = function(html) {
     if (!window._morphReady) { window._pending = html; return; }
+    if (window._needsLoading(html)) {
+      window._scheduleLoading('Streaming widget structure…');
+    } else if (window.__PI_GENERATIVE_UI_STREAMING_METRICS__.scriptRuns === 0) {
+      window._hideLoading();
+    }
     window.__PI_GENERATIVE_UI_STREAMING_METRICS__.contentUpdates += 1;
     var root = document.getElementById('root');
     var target = document.createElement('div');
@@ -77,11 +116,47 @@ ${SVG_STYLES}
   };
   window._runScripts = function() {
     window.__PI_GENERATIVE_UI_STREAMING_METRICS__.scriptRuns += 1;
-    document.querySelectorAll('#root script').forEach(function(old) {
+    var scripts = Array.from(document.querySelectorAll('#root script'));
+    if (!scripts.length) {
+      window._hideLoading();
+      return;
+    }
+    window._scheduleLoading();
+    var pending = 0;
+    var finished = false;
+    function complete() {
+      if (finished) return;
+      finished = true;
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          window._hideLoading();
+        });
+      });
+    }
+    function checkDone() {
+      if (pending === 0) complete();
+    }
+    scripts.forEach(function(old) {
       var s = document.createElement('script');
-      if (old.src) { s.src = old.src; } else { s.textContent = old.textContent; }
+      Array.from(old.attributes).forEach(function(attr) {
+        s.setAttribute(attr.name, attr.value);
+      });
+      if (old.src) {
+        pending += 1;
+        s.addEventListener('load', function() {
+          pending -= 1;
+          checkDone();
+        });
+        s.addEventListener('error', function() {
+          pending -= 1;
+          checkDone();
+        });
+      } else {
+        s.textContent = old.textContent;
+      }
       old.parentNode.replaceChild(s, old);
     });
+    checkDone();
   };
 </script>
 ${widgetBridgeScript()}
@@ -371,6 +446,33 @@ export default function (pi: ExtensionAPI) {
     return win;
   }
 
+  async function waitForWindowReady(win: WidgetWindow) {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      win.on("ready", finish);
+      win.on("closed", () => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("Widget window closed before reporting ready."));
+      });
+      win.on("error", (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+  }
+
+  function nonStreamingContent(code: string, isSVG: boolean) {
+    if (!isSVG) return code;
+    return `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;">${code}</div>`;
+  }
+
   pi.on("message_update", async (event) => {
     const raw: any = event.assistantMessageEvent;
     if (!raw) return;
@@ -578,12 +680,14 @@ export default function (pi: ExtensionAPI) {
       } else {
         setWidgetTerminalStatus(title, width, height, "opening");
         emitPartialStatus("opening");
-        win = await openWidgetWindow(wrapHTML(code, isSVG), {
+        win = await openWidgetWindow(shellHTML(), {
           width,
           height,
           title,
           floating: params.floating ?? false,
         });
+        await waitForWindowReady(win);
+        win.send(`window._setContent('${escapeJS(nonStreamingContent(code, isSVG))}'); window._runScripts();`);
         setWidgetTerminalStatus(title, width, height, "ready");
         emitPartialStatus("ready");
       }

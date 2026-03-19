@@ -126,6 +126,7 @@ input[type="range"]::-webkit-slider-thumb {
 input[type="text"], input[type="number"], textarea, select {
   height: 36px;
   background: var(--color-background-primary);
+  background-color: var(--color-background-primary);
   border: 0.5px solid var(--color-border-tertiary);
   border-radius: var(--border-radius-md);
   color: var(--color-text-primary);
@@ -133,6 +134,14 @@ input[type="text"], input[type="number"], textarea, select {
   font-size: 14px;
   font-family: var(--font-sans);
   outline: none;
+}
+select {
+  appearance: none;
+  -webkit-appearance: none;
+}
+option {
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
 }
 input[type="text"]:hover, input[type="number"]:hover, textarea:hover, select:hover {
   border-color: var(--color-border-secondary);
