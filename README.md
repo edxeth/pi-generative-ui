@@ -1,6 +1,6 @@
 # pi-generative-ui
 
-Native generative UI for [pi](https://github.com/badlogic/pi).
+Native generative UI for [pi](https://github.com/badlogic/pi-mono).
 
 Ask pi to explain something visually and it can open a real native window with HTML, SVG, charts, sliders, buttons, and JS-driven interactions — streamed live while the model is still generating.
 
