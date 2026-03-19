@@ -6,12 +6,12 @@ Ask pi to explain something visually and it can open a real native window with H
 
 ## What's different from the original pi-generative-ui
 
-This fork keeps the core idea, but changes the runtime story:
+This fork keeps the core idea, but extends and tightens it:
 
 - adds a verified Linux path
-- uses upstream **Glimpse** as the runtime on both macOS and Linux
-- removes the old repo-local Linux helper from the production path
-- cleans up the package layout and verification flow
+- standardizes the native runtime around **Glimpse**
+- improves backend diagnostics and verification
+- cleans up the package layout
 
 ## What it does
 
@@ -40,13 +40,9 @@ pi --no-extensions -e /absolute/path/to/pi-generative-ui
 
 ## Platform support
 
-### macOS
-Works through upstream `glimpseui`.
-
-### Linux
-Works through upstream `glimpseui` too.
-
-**Verified path:** WSL2 Ubuntu 24 with WSLg.
+- **macOS** — supported
+- **Linux** — supported via `glimpseui`
+- **Verified Linux environment** — WSL2 Ubuntu 24 with WSLg
 
 ## Linux prerequisites
 
