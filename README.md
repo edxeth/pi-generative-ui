@@ -138,7 +138,7 @@ Claude’s generative UI is one of the best parts of the product. This package b
 
 ## Attribution
 
-This repository is a cleaned-up continuation of work originally developed in [`Michaelliv/pi-generative-ui`](https://github.com/Michaelliv/pi-generative-ui), with the final runtime simplified around upstream Glimpse and the legacy Linux helper removed.
+This project builds on the original [`Michaelliv/pi-generative-ui`](https://github.com/Michaelliv/pi-generative-ui), which established the core generative UI extension and guideline extraction work. The later Linux support, runtime migration work, and cleanup reflected in this repository live in this repo's own history.
 
 ## License
 
