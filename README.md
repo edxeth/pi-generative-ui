@@ -4,6 +4,15 @@ Native generative UI for [pi](https://github.com/badlogic/pi).
 
 Ask pi to explain something visually and it can open a real native window with HTML, SVG, charts, sliders, buttons, and JS-driven interactions — streamed live while the model is still generating.
 
+## What's different from the original pi-generative-ui
+
+This fork keeps the core idea, but changes the runtime story:
+
+- adds a verified Linux path
+- uses upstream **Glimpse** as the runtime on both macOS and Linux
+- removes the old repo-local Linux helper from the production path
+- cleans up the package layout and verification flow
+
 ## What it does
 
 - opens native widget windows on **macOS and Linux**
@@ -38,8 +47,6 @@ Works through upstream `glimpseui`.
 Works through upstream `glimpseui` too.
 
 **Verified path:** WSL2 Ubuntu 24 with WSLg.
-
-Native Linux desktops may work, but the verified acceptance environment is WSL2 Ubuntu 24 + WSLg.
 
 ## Linux prerequisites
 
