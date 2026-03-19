@@ -23,7 +23,7 @@ export function getWidgetBackend(): WidgetBackend {
   }
 
   backend = {
-    kind: "linux-webview",
+    kind: "glimpse",
     async checkSupport() {
       return {
         ok: false as const,

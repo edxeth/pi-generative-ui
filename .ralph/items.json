@@ -65,8 +65,8 @@
         "Verify the repo-local Linux helper is no longer part of the production Linux runtime path or documented install workflow.",
         "Verify README and package metadata accurately describe the verified Linux support claim, Glimpse-based prerequisites, and headed interactive validation workflow."
       ],
-      "passes": false,
-      "regression_notes": ""
+      "passes": true,
+      "regression_notes": "2026-03-19: Retired the shipped helper backend by deleting `.pi/extensions/generative-ui/backend/linux.ts`, narrowing the production backend kind to `glimpse`, and rewriting `README.md` plus `package.json` metadata for the strict Glimpse-first Linux architecture. Verified with `npm install` ✅, `npm pack --dry-run` ✅ (tarball omits `.pi/extensions/generative-ui/backend/linux.ts` and `.pi/extensions/generative-ui/native/linux/**`), `tsc --noEmit --module es2022 --moduleResolution bundler --target es2022 --skipLibCheck .pi/extensions/generative-ui/index.ts .pi/extensions/generative-ui/backend/*.ts` ✅, `tsc --allowJs --checkJs --noEmit scripts/*.js` ✅, `node --check scripts/*.js` ✅, backend kind => `glimpse` ✅, and real `checkSupport()` => `{ ok: true }` ✅. README/package metadata now document the verified WSL2 Ubuntu 24 + WSLg Glimpse path, GTK4/WebKitGTK 6.0 prerequisites, the Ubuntu 24 layer-shell repo blocker, and the headed interactive `pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui` validation workflow with no repo-local helper production path remaining."
     }
   ]
 }

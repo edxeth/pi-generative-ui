@@ -14,7 +14,7 @@ This extension replicates that system for pi:
 
 1. **LLM calls `visualize_read_me`** - loads design guidelines (lazy, only the relevant modules)
 2. **LLM calls `show_widget`** - generates an HTML fragment as a tool call parameter
-3. **Extension intercepts the stream** - opens a native platform window (Glimpse on macOS, the bundled Linux helper on Linux) and feeds partial HTML as tokens arrive
+3. **Extension intercepts the stream** - opens a native platform window through upstream [Glimpse](https://github.com/hazat/glimpse) on supported macOS and Linux and feeds partial HTML as tokens arrive
 4. **[morphdom](https://github.com/patrick-steele-idem/morphdom) diffs the DOM** - new elements fade in smoothly, unchanged elements stay untouched
 5. **Scripts execute on completion** - Chart.js, D3, Three.js, anything from CDN
 
@@ -28,26 +28,35 @@ pi install git:github.com/Michaelliv/pi-generative-ui
 
 Supported paths:
 
-- **macOS** - uses [Glimpse](https://github.com/hazat/glimpse) and the optional `glimpseui` dependency
-- **Linux / WSL2 Ubuntu 24** - builds a package-local helper at install time and opens widgets in a native GTK/WebKit window
+- **macOS** - uses upstream `glimpseui`
+- **Linux / WSL2 Ubuntu 24** - verified with upstream `glimpseui` on a headed Linux GUI path (`WSLg` or equivalent)
 
 ### Linux / WSL2 prerequisites
 
-The supported Linux acceptance path is **WSL2 Ubuntu 24 with WSLg enabled**.
+The verified Linux acceptance path is **WSL2 Ubuntu 24 with WSLg enabled**.
 
-Install a compiler toolchain plus one supported GTK/WebKit runtime set:
+Install the Linux build prerequisites Glimpse needs:
 
 ```bash
-sudo apt install -y build-essential
-sudo apt install -y libgtk-3-0 libwebkit2gtk-4.1-0
+sudo apt install -y \
+  build-essential meson ninja-build \
+  libwayland-dev wayland-protocols \
+  libgtk-4-dev libwebkitgtk-6.0-dev \
+  gobject-introspection libgirepository1.0-dev \
+  gtk-doc-tools python3 valac
 ```
 
-Then install the package and verify the helper was built:
+Ubuntu 24 default apt repos do **not** currently provide `gtk4-layer-shell-0` / `libgtk4-layer-shell-dev`. For that blocker, either:
+
+- point `GLIMPSE_BINARY_PATH` / `GLIMPSE_HOST_PATH` at a prebuilt upstream Glimpse Linux host, or
+- build and install upstream `gtk4-layer-shell` first, then build Glimpse locally
+
+Then install and verify the package:
 
 ```bash
 npm install
+npm --prefix node_modules/glimpseui run build:linux
 npm pack --dry-run
-ls -l .pi/extensions/generative-ui/native/linux/bin
 ```
 
 ### Headed verification workflow
@@ -111,27 +120,28 @@ Key details:
 - **morphdom DOM diffing** - only changed nodes update; new nodes get a 0.3s fade-in animation
 - **pi-ai's `parseStreamingJson`** - no need for a partial JSON parser; pi already provides parsed `arguments` on every delta
 - **150ms debounce** - batches rapid token updates for smooth visual rendering
-- **Dark mode by default** - `#1a1a1a` background, designed for the native macOS and Linux webview backends
+- **Dark mode by default** - `#1a1a1a` background, designed for the native Glimpse backend
 
-### Native backends
+### Native backend
 
-- **macOS:** [Glimpse](https://github.com/hazat/glimpse), a tiny Swift/WKWebView bridge
-- **Linux:** a bundled helper binary that speaks JSONL over stdin/stdout and hosts the widget in GTK/WebKit
+- **macOS:** upstream [Glimpse](https://github.com/hazat/glimpse)
+- **Linux:** upstream Glimpse Linux host (`glimpseui`) built on Rust + GTK4 + WebKitGTK 6.0
 
-Both backends expose the same page bridge: `window.glimpse.send(data)` and `window.glimpse.close()`.
+Both platforms expose the same page bridge: `window.glimpse.send(data)` and `window.glimpse.close()`.
 
 ## Project structure
 
 ```
 pi-generative-ui/
 ├── .pi/extensions/generative-ui/
-│   ├── backend/              # Platform selection + macOS/Linux adapters
+│   ├── backend/              # Backend selection + Glimpse adapter
 │   ├── index.ts              # Extension: tools, streaming, backend integration
 │   ├── guidelines.ts         # 72K of verbatim claude.ai design guidelines
-│   ├── claude-guidelines/    # Raw extracted markdown (reference)
-│   └── native/linux/src/     # Linux helper source
-├── scripts/postinstall.js    # Builds the Linux helper on Linux installs
-└── package.json              # pi-package manifest
+│   └── claude-guidelines/    # Raw extracted markdown (reference)
+├── scripts/postinstall.js                    # Verifies upstream glimpseui during install
+├── scripts/verify-glimpse-fallback.js        # Deterministic Glimpse error normalization checks
+├── scripts/verify-linux-glimpse-support.js   # Real Linux support probe
+└── package.json                              # pi-package manifest
 ```
 
 ## How the guidelines were extracted
@@ -149,7 +159,7 @@ The raw `read_me` responses are preserved in [`claude-guidelines/`](.pi/extensio
 ## Credits
 
 - [pi](https://github.com/badlogic/pi) - the extensible coding agent that makes this possible
-- [Glimpse](https://github.com/hazat/glimpse) - native macOS WKWebView windows
+- [Glimpse](https://github.com/hazat/glimpse) - native macOS and Linux windows for the widget runtime
 - [morphdom](https://github.com/patrick-steele-idem/morphdom) - DOM diffing for smooth streaming
 - Anthropic - for building the generative UI system we reverse-engineered
 

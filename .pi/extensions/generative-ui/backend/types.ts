@@ -1,4 +1,4 @@
-export type WidgetBackendKind = "glimpse" | "linux-webview";
+export type WidgetBackendKind = "glimpse";
 export type WidgetWindowEvent = "ready" | "message" | "closed" | "error";
 
 export interface OpenWindowOptions {
