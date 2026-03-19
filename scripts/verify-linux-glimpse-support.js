@@ -194,8 +194,8 @@ if (skippedBuildReason) {
   log(`skippedBuild=${skippedBuildReason}`);
 }
 
-const kindOutput = runTsxSnippet("import { getWidgetBackend } from './.pi/extensions/generative-ui/backend/index.ts'; const backend = getWidgetBackend(); console.log(JSON.stringify({ kind: backend.kind }));");
-const supportOutput = runTsxSnippet("import { getWidgetBackend } from './.pi/extensions/generative-ui/backend/index.ts'; const backend = getWidgetBackend(); Promise.resolve(backend.checkSupport()).then((support) => console.log(JSON.stringify(support))); ");
+const kindOutput = runTsxSnippet("import { getWidgetBackend } from './src/generative-ui/backend/index.ts'; const backend = getWidgetBackend(); console.log(JSON.stringify({ kind: backend.kind }));");
+const supportOutput = runTsxSnippet("import { getWidgetBackend } from './src/generative-ui/backend/index.ts'; const backend = getWidgetBackend(); Promise.resolve(backend.checkSupport()).then((support) => console.log(JSON.stringify(support))); ");
 
 log(`backendKind=${kindOutput}`);
 log(`backendSupport=${supportOutput}`);

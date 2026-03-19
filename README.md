@@ -1,24 +1,21 @@
 # pi-generative-ui
 
-Claude.ai's generative UI - reverse-engineered, rebuilt for [pi](https://github.com/badlogic/pi).
+Native generative UI for [pi](https://github.com/badlogic/pi).
 
-Ask pi to "show me how compound interest works" and get a live interactive widget - sliders, charts, animations - rendered in a native macOS or Linux window. Not a screenshot. Not a code block. A real HTML application with JavaScript, streaming live as the LLM generates it.
+Ask pi to explain something visually and it can open a real native window with HTML, SVG, charts, sliders, buttons, and JS-driven interactions — streamed live while the model is still generating.
 
-<img src="media/dashboard.gif" width="32%"> <img src="media/simulator.gif" width="32%"> <img src="media/diagram.gif" width="32%">
+## What it does
 
-## How it works
+- opens native widget windows on **macOS and Linux**
+- uses **upstream [Glimpse](https://github.com/hazat/glimpse)** as the runtime on both platforms
+- preserves the Claude-style flow:
+  - `visualize_read_me`
+  - `show_widget`
+  - streaming partial UI before final completion
+  - `window.glimpse.send(data)` back to pi
+  - `sendPrompt(...)` / follow-up prompt bridge
 
-On claude.ai, when you ask Claude to visualize something, it calls a tool called `show_widget` that renders HTML inline in the conversation. The HTML streams live - you see cards, charts, and sliders appear as tokens arrive.
-
-This extension replicates that system for pi:
-
-1. **LLM calls `visualize_read_me`** - loads design guidelines (lazy, only the relevant modules)
-2. **LLM calls `show_widget`** - generates an HTML fragment as a tool call parameter
-3. **Extension intercepts the stream** - opens a native platform window through upstream [Glimpse](https://github.com/hazat/glimpse) on supported macOS and Linux and feeds partial HTML as tokens arrive
-4. **[morphdom](https://github.com/patrick-steele-idem/morphdom) diffs the DOM** - new elements fade in smoothly, unchanged elements stay untouched
-5. **Scripts execute on completion** - Chart.js, D3, Three.js, anything from CDN
-
-The widget window has full browser capabilities and a bidirectional bridge - `window.glimpse.send(data)` sends data back to the agent.
+If the model wants a chart, a calculator, a diagram, or a tiny app, it can build one instead of dumping markup into chat.
 
 ## Install
 
@@ -26,16 +23,27 @@ The widget window has full browser capabilities and a bidirectional bridge - `wi
 pi install git:github.com/Michaelliv/pi-generative-ui
 ```
 
-Supported paths:
+Or test the local repo directly:
 
-- **macOS** - uses upstream `glimpseui`
-- **Linux / WSL2 Ubuntu 24** - verified with upstream `glimpseui` on a headed Linux GUI path (`WSLg` or equivalent)
+```bash
+pi --no-extensions -e /absolute/path/to/pi-generative-ui
+```
 
-### Linux / WSL2 prerequisites
+## Platform support
 
-The verified Linux acceptance path is **WSL2 Ubuntu 24 with WSLg enabled**.
+### macOS
+Works through upstream `glimpseui`.
 
-Install the Linux build prerequisites Glimpse needs:
+### Linux
+Works through upstream `glimpseui` too.
+
+**Verified path:** WSL2 Ubuntu 24 with WSLg.
+
+Native Linux desktops may work, but the verified acceptance environment is WSL2 Ubuntu 24 + WSLg.
+
+## Linux prerequisites
+
+Glimpse on Linux needs GTK4 + WebKitGTK 6.0 build/runtime dependencies.
 
 ```bash
 sudo apt install -y \
@@ -46,122 +54,87 @@ sudo apt install -y \
   gtk-doc-tools python3 valac
 ```
 
-Ubuntu 24 default apt repos do **not** currently provide `gtk4-layer-shell-0` / `libgtk4-layer-shell-dev`. For that blocker, either:
-
-- point `GLIMPSE_BINARY_PATH` / `GLIMPSE_HOST_PATH` at a prebuilt upstream Glimpse Linux host, or
-- build and install upstream `gtk4-layer-shell` first, then build Glimpse locally
-
-Then install and verify the package:
+Then:
 
 ```bash
 npm install
 npm --prefix node_modules/glimpseui run build:linux
-npm pack --dry-run
 ```
 
-### Headed verification workflow
+### Important Ubuntu 24 note
 
-Use a real interactive pi session - not print mode and not JSON mode:
+Default Ubuntu 24 repos may not provide `gtk4-layer-shell-0` / `libgtk4-layer-shell-dev`.
+
+If that blocks the build, use one of these paths:
+- point `GLIMPSE_BINARY_PATH` / `GLIMPSE_HOST_PATH` at a prebuilt Glimpse Linux host
+- or build/install upstream `gtk4-layer-shell`, then build Glimpse locally
+
+## What the experience looks like
+
+A typical run looks like this:
+
+1. the model loads design guidance with `visualize_read_me`
+2. it starts `show_widget`
+3. the native window opens early
+4. partial UI streams in while the tool call is still in progress
+5. final scripts run once
+6. the widget sends data back with `window.glimpse.send(...)`
+
+Supported widget types include:
+- Chart.js charts
+- sliders and controls
+- calculators and dashboards
+- SVG diagrams
+- Canvas animations
+- small interactive tools and forms
+
+## Quick verification
+
+Launch pi against the repo:
 
 ```bash
-pi --no-extensions -e /home/devkit/.pi/agent/extensions/pi-generative-ui
+pi --no-extensions -e /absolute/path/to/pi-generative-ui
 ```
 
-Ask pi for a visual explanation so it calls `visualize_read_me` and `show_widget`, then confirm:
+Then use a prompt like:
 
-1. a native widget window opens while pi stays interactive
-2. the widget can call `window.glimpse.send(...)`
-3. the returned payload appears back in pi's tool result
-
-## Usage
-
-Just ask pi to visualize things. The extension adds two tools that the LLM calls automatically:
-
-- **"Show me how compound interest works"** → interactive explainer with sliders and Chart.js
-- **"Visualize the architecture of a transformer"** → SVG diagram with labeled components  
-- **"Create a dashboard for this data"** → metric cards, charts, tables
-- **"Draw a particle system"** → Canvas animation
-
-The LLM decides when to use widgets vs text based on the request. Explanatory/visual requests trigger widgets; code/text requests stay in the terminal.
-
-## What's inside
-
-### The guidelines - extracted from Claude
-
-The design guidelines aren't hand-written. They're **extracted verbatim from claude.ai**.
-
-Here's the trick: you can export any claude.ai conversation as JSON. The export includes full tool call payloads - including the complete `read_me` tool results containing Anthropic's actual design system. 72K of production rules covering typography, color palettes, streaming-safe CSS patterns, Chart.js configuration, SVG diagram engineering, and more.
-
-We triggered `read_me` with each module combination, exported the conversation, parsed the JSON, split the responses into deduplicated sections, and verified byte-level accuracy against the originals. The result: our LLM gets the exact same instructions Claude gets on claude.ai.
-
-Five modules, loaded on demand:
-
-| Module | Size | What it covers |
-|---|---|---|
-| `interactive` | 19KB | Sliders, metric cards, live calculations |
-| `chart` | 22KB | Chart.js setup, custom legends, number formatting |
-| `mockup` | 19KB | UI component tokens, cards, forms, skeleton loading |
-| `art` | 17KB | SVG illustration, Canvas animation, creative patterns |
-| `diagram` | 59KB | Flowcharts, architecture diagrams, SVG arrow systems |
-
-### Streaming architecture
-
-The extension intercepts pi's streaming events (`toolcall_start` / `toolcall_delta` / `toolcall_end`) to render the widget live as tokens arrive:
-
-```
-toolcall_start    → initialize streaming state
-toolcall_delta    → debounce 150ms, open window, morphdom diff
-toolcall_end      → final diff + execute <script> tags
-execute()         → reuse window, wait for interaction or close
+```text
+Create a native interactive widget that proves real-time streaming.
+Use visualize_read_me first, then show_widget.
+Build a dark widget with a slider, a Chart.js line chart, and a button that calls window.glimpse.send({ ok: true }).
+Make the UI appear in obvious stages instead of all at once.
 ```
 
-Key details:
-- **Shell HTML + JS eval** - window opens with an empty shell; content injected via `win.send()`, not `setHTML()`, to avoid full-page flashes
-- **morphdom DOM diffing** - only changed nodes update; new nodes get a 0.3s fade-in animation
-- **pi-ai's `parseStreamingJson`** - no need for a partial JSON parser; pi already provides parsed `arguments` on every delta
-- **150ms debounce** - batches rapid token updates for smooth visual rendering
-- **Dark mode by default** - `#1a1a1a` background, designed for the native Glimpse backend
+What you should see:
+- the window opens before the tool finishes
+- UI appears progressively
+- the chart renders
+- the slider updates live
+- clicking the button returns data into pi
 
-### Native backend
+## Architecture
 
-- **macOS:** upstream [Glimpse](https://github.com/hazat/glimpse)
-- **Linux:** upstream Glimpse Linux host (`glimpseui`) built on Rust + GTK4 + WebKitGTK 6.0
+This repo is intentionally small.
 
-Both platforms expose the same page bridge: `window.glimpse.send(data)` and `window.glimpse.close()`.
-
-## Project structure
-
-```
-pi-generative-ui/
-├── .pi/extensions/generative-ui/
-│   ├── backend/              # Backend selection + Glimpse adapter
-│   ├── index.ts              # Extension: tools, streaming, backend integration
-│   ├── guidelines.ts         # 72K of verbatim claude.ai design guidelines
-│   └── claude-guidelines/    # Raw extracted markdown (reference)
-├── scripts/postinstall.js                    # Verifies upstream glimpseui during install
-├── scripts/verify-glimpse-fallback.js        # Deterministic Glimpse error normalization checks
-├── scripts/verify-linux-glimpse-support.js   # Real Linux support probe
-└── package.json                              # pi-package manifest
+```text
+src/generative-ui/
+├── index.ts              # extension runtime, streaming, lifecycle, tool rendering
+├── backend/              # Glimpse adapter + support diagnostics
+├── guidelines.ts         # extracted design guidance
+└── claude-guidelines/    # raw reference material
 ```
 
-## How the guidelines were extracted
+No in-house Linux window backend remains in the production path.
+Linux and macOS both go through upstream Glimpse.
 
-1. Start a conversation on claude.ai that triggers `show_widget`
-2. Call `read_me` with each module combination (`art`, `chart`, `diagram`, `interactive`, `mockup`)
-3. Export the conversation as JSON from claude.ai settings
-4. Parse the JSON - every `tool_result` for `visualize:read_me` contains the complete guidelines
-5. Split each response at `##` heading boundaries
-6. Deduplicate shared sections (e.g., "Color palette" appears in chart, mockup, interactive, diagram)
-7. Verify reconstruction matches the originals (4/5 exact, 1 has a single whitespace char difference)
+## Known rough edges
 
-The raw `read_me` responses are preserved in [`claude-guidelines/`](.pi/extensions/generative-ui/claude-guidelines/) - the original markdown exactly as claude.ai returned it, before splitting and deduplication. The conversation export JSON is not included in this repo.
+- Linux stderr noise from GTK/Mesa can still appear in the pi terminal on some setups because it comes from upstream Glimpse/WebKitGTK, not from widget code.
+- The verified Linux story is strong on WSL2 Ubuntu 24 + WSLg; other Linux environments are best-effort unless separately validated.
 
-## Credits
+## Why this package exists
 
-- [pi](https://github.com/badlogic/pi) - the extensible coding agent that makes this possible
-- [Glimpse](https://github.com/hazat/glimpse) - native macOS and Linux windows for the widget runtime
-- [morphdom](https://github.com/patrick-steele-idem/morphdom) - DOM diffing for smooth streaming
-- Anthropic - for building the generative UI system we reverse-engineered
+Claude’s generative UI is one of the best parts of the product. This package brings that interaction model to pi without requiring a browser tab: native windows, live streaming, and real bidirectional widget interaction.
 
 ## License
 

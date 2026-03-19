@@ -5,13 +5,12 @@
   "type": "commonjs",
   "keywords": ["pi-package"],
   "files": [
-    ".pi/extensions/generative-ui",
-    "!.pi/extensions/generative-ui/native/linux/**",
+    "src/generative-ui",
     "scripts",
     "README.md"
   ],
   "pi": {
-    "extensions": [".pi/extensions/generative-ui/index.ts"]
+    "extensions": ["src/generative-ui/index.ts"]
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js"

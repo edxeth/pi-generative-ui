@@ -81,10 +81,10 @@ function compileBackend(outDir) {
     "--target", "es2022",
     "--skipLibCheck",
     "--outDir", outDir,
-    ".pi/extensions/generative-ui/backend/index.ts",
-    ".pi/extensions/generative-ui/backend/glimpse.ts",
-    ".pi/extensions/generative-ui/backend/errors.ts",
-    ".pi/extensions/generative-ui/backend/types.ts",
+    "src/generative-ui/backend/index.ts",
+    "src/generative-ui/backend/glimpse.ts",
+    "src/generative-ui/backend/errors.ts",
+    "src/generative-ui/backend/types.ts",
   ]);
 }
 
