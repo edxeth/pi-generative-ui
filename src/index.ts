@@ -12,6 +12,69 @@ interface FollowUpPromptMessage {
   replyMode?: "followUp" | "steer";
 }
 
+interface WidgetTraceMessage {
+  type: "__pi_widget_trace";
+  phase: string;
+  data?: unknown;
+  at?: number;
+}
+
+interface WidgetTraceEntry {
+  source: "host" | "widget";
+  phase: string;
+  at: string;
+  elapsedMs: number;
+  data?: unknown;
+}
+
+interface WidgetTraceCarrier {
+  traceStartedAt: number;
+  debugTrace: WidgetTraceEntry[];
+}
+
+const DEBUG_TRACE_ENABLED = process.env.PI_GENERATIVE_UI_DEBUG === "1";
+const DEBUG_STDERR_ENABLED = process.env.PI_GENERATIVE_UI_DEBUG_STDERR === "1";
+const MIN_PLACEHOLDER_VISIBLE_MS = 220;
+const SCRIPT_STAGE_DELAY_MS = 40;
+
+function sanitizeTraceValue(value: unknown, depth = 0): unknown {
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    return value.length > 240 ? `${value.slice(0, 240)}…` : value;
+  }
+  if (value instanceof Error) {
+    return { name: value.name, message: value.message };
+  }
+  if (depth >= 3) return "[max-depth]";
+  if (Array.isArray(value)) {
+    return value.slice(0, 12).map((item) => sanitizeTraceValue(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, 16);
+    return Object.fromEntries(entries.map(([key, item]) => [key, sanitizeTraceValue(item, depth + 1)]));
+  }
+  return String(value);
+}
+
+function pushTrace(target: WidgetTraceCarrier | null | undefined, source: "host" | "widget", phase: string, data?: unknown) {
+  if (!target) return;
+  const entry: WidgetTraceEntry = {
+    source,
+    phase,
+    at: new Date().toISOString(),
+    elapsedMs: Date.now() - target.traceStartedAt,
+  };
+  const sanitized = sanitizeTraceValue(data);
+  if (sanitized !== undefined) {
+    entry.data = sanitized;
+  }
+  target.debugTrace.push(entry);
+  if (DEBUG_STDERR_ENABLED) {
+    const suffix = entry.data === undefined ? "" : ` ${JSON.stringify(entry.data)}`;
+    console.error(`[pi-generative-ui] ${entry.elapsedMs}ms ${source}:${phase}${suffix}`);
+  }
+}
+
 function widgetBridgeScript(): string {
   return `<script>
   window.sendPrompt = function(prompt, replyMode) {
@@ -23,6 +86,23 @@ function widgetBridgeScript(): string {
       replyMode: replyMode === 'steer' ? 'steer' : 'followUp'
     });
   };
+  window.__piWidgetTrace = function(phase, data) {
+    if (!window.glimpse || typeof window.glimpse.send !== 'function') return;
+    if (typeof phase !== 'string' || !phase) return;
+    window.glimpse.send({
+      type: '__pi_widget_trace',
+      phase: phase,
+      data: data == null ? null : data,
+      at: Date.now()
+    });
+  };
+  if (Array.isArray(window.__PI_WIDGET_PENDING_TRACES__)) {
+    window.__PI_WIDGET_PENDING_TRACES__.forEach(function(entry) {
+      if (!Array.isArray(entry) || entry.length < 1) return;
+      window.__piWidgetTrace(entry[0], entry[1]);
+    });
+    window.__PI_WIDGET_PENDING_TRACES__ = [];
+  }
 </script>`;
 }
 
@@ -38,6 +118,19 @@ function extractFollowUpPromptMessage(data: unknown): FollowUpPromptMessage | nu
   };
 }
 
+function extractWidgetTraceMessage(data: unknown): WidgetTraceMessage | null {
+  if (!data || typeof data !== "object") return null;
+  const record = data as Record<string, unknown>;
+  if (record.type !== "__pi_widget_trace") return null;
+  if (typeof record.phase !== "string" || !record.phase) return null;
+  return {
+    type: "__pi_widget_trace",
+    phase: record.phase,
+    data: record.data,
+    at: typeof record.at === "number" ? record.at : undefined,
+  };
+}
+
 // Shell HTML with a root container — used for streaming.
 // Content is injected via win.send() JS eval, not a full reload, to avoid flashes.
 function shellHTML(): string {
@@ -48,32 +141,56 @@ function shellHTML(): string {
 body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;position:relative;}
 @keyframes _fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
 @keyframes _pulse{0%,100%{opacity:.45}50%{opacity:1}}
-#pi-loading{position:absolute;inset:1rem;display:none;align-items:stretch;justify-content:center;pointer-events:none;z-index:9999}
+#pi-loading{position:sticky;top:0;display:none;align-items:center;gap:10px;padding:0 0 12px;pointer-events:none;z-index:9999}
 #pi-loading[data-visible="1"]{display:flex}
-#pi-loading-panel{width:min(960px,100%);min-height:100%;border:1px solid rgba(255,255,255,.08);border-radius:18px;background:rgba(26,26,26,.88);padding:18px;display:grid;gap:14px}
-#pi-loading-title{font-size:.95rem;letter-spacing:.06em;text-transform:uppercase;opacity:.72}
-#pi-loading-subtitle{font-size:1rem;opacity:.9}
-#pi-loading-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-#pi-loading-chart-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:12px;min-height:320px}
-.pi-loading-card,.pi-loading-chart{border-radius:16px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.035);overflow:hidden;position:relative}
-.pi-loading-card{height:88px}.pi-loading-chart{min-height:320px}
-.pi-loading-card::before,.pi-loading-chart::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,255,255,.03),rgba(255,255,255,.12),rgba(255,255,255,.03));transform:translateX(-100%);animation:_fadeIn .3s ease both,_pulse 1.2s ease-in-out infinite}
-@media (max-width:900px){#pi-loading-grid,#pi-loading-chart-grid{grid-template-columns:minmax(0,1fr)}}
+#pi-loading-badge{display:inline-flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,.08);border-radius:999px;background:rgba(26,26,26,.88);padding:10px 14px;max-width:min(100%,560px)}
+#pi-loading-spinner{width:12px;height:12px;border-radius:999px;border:2px solid rgba(255,255,255,.18);border-top-color:rgba(255,255,255,.9);animation:_spin .8s linear infinite}
+#pi-loading-text{display:grid;gap:2px;min-width:0}
+#pi-loading-title{font-size:.92rem;letter-spacing:.02em;opacity:.95}
+#pi-loading-subtitle{font-size:.82rem;opacity:.62;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes _spin{to{transform:rotate(360deg)}}
 ${SVG_STYLES}
 </style>
-</head><body><div id="root"></div><div id="pi-loading" aria-hidden="true"><div id="pi-loading-panel"><div id="pi-loading-title">Loading interactive widget</div><div id="pi-loading-subtitle">Rendering charts, scripts, and controls…</div><div id="pi-loading-grid"><div class="pi-loading-card"></div><div class="pi-loading-card"></div><div class="pi-loading-card"></div><div class="pi-loading-card"></div></div><div id="pi-loading-chart-grid"><div class="pi-loading-chart"></div><div class="pi-loading-chart"></div></div></div></div>
+</head><body><div id="pi-loading" aria-hidden="true"><div id="pi-loading-badge"><div id="pi-loading-spinner"></div><div id="pi-loading-text"><div id="pi-loading-title">Generating UI…</div><div id="pi-loading-subtitle">Waiting for streamed HTML and startup scripts…</div></div></div></div><div id="root"></div>
 <script>
   window._morphReady = false;
   window._pending = null;
   window._loadingTimer = null;
+  window._loadingVisible = false;
+  window.__PI_WIDGET_PENDING_TRACES__ = [];
   window.piGenerativeUiStreamingMetrics = { contentUpdates: 0, scriptRuns: 0 };
   window.__PI_GENERATIVE_UI_STREAMING_METRICS__ = window.piGenerativeUiStreamingMetrics;
+  window._trace = function(phase, data) {
+    if (typeof window.__piWidgetTrace === 'function') {
+      window.__piWidgetTrace(phase, data == null ? null : data);
+      return;
+    }
+    window.__PI_WIDGET_PENDING_TRACES__.push([phase, data == null ? null : data]);
+  };
+  window._trace('shell_boot', { readyState: document.readyState });
+  window.addEventListener('error', function(event) {
+    window._trace('window_error', {
+      message: event && event.message ? String(event.message) : 'Unknown error',
+      source: event && event.filename ? String(event.filename) : null,
+      line: event && typeof event.lineno === 'number' ? event.lineno : null
+    });
+  });
+  window.addEventListener('unhandledrejection', function(event) {
+    var reason = event && 'reason' in event ? event.reason : null;
+    window._trace('window_unhandled_rejection', {
+      reason: reason && reason.message ? String(reason.message) : String(reason)
+    });
+  });
   window._setLoading = function(visible, subtitle) {
     var loading = document.getElementById('pi-loading');
     var text = document.getElementById('pi-loading-subtitle');
     if (!loading) return;
     loading.dataset.visible = visible ? '1' : '0';
     if (subtitle && text) text.textContent = subtitle;
+    if (window._loadingVisible !== !!visible) {
+      window._loadingVisible = !!visible;
+      window._trace(visible ? 'loading_shown' : 'loading_hidden', { subtitle: subtitle || null });
+    }
   };
   window._scheduleLoading = function(subtitle) {
     clearTimeout(window._loadingTimer);
@@ -89,9 +206,45 @@ ${SVG_STYLES}
     if (typeof html !== 'string') return false;
     return /<script[\s>]/i.test(html) || /<canvas[\s>]/i.test(html);
   };
+  window._snapshotDom = function(phase) {
+    var root = document.getElementById('root');
+    if (!root) return;
+    var canvases = Array.from(root.querySelectorAll('canvas')).slice(0, 4).map(function(canvas) {
+      return {
+        id: canvas.id || null,
+        width: canvas.width,
+        height: canvas.height,
+        clientWidth: canvas.clientWidth,
+        clientHeight: canvas.clientHeight
+      };
+    });
+    window._trace('dom_snapshot', {
+      phase: phase,
+      elements: root.querySelectorAll('*').length,
+      textLength: root.textContent ? root.textContent.trim().length : 0,
+      inputs: root.querySelectorAll('input').length,
+      selects: root.querySelectorAll('select').length,
+      buttons: root.querySelectorAll('button').length,
+      canvases: canvases,
+      headings: Array.from(root.querySelectorAll('h1,h2,h3')).slice(0, 3).map(function(el) {
+        return (el.textContent || '').trim();
+      })
+    });
+  };
   window._setContent = function(html) {
-    if (!window._morphReady) { window._pending = html; return; }
-    if (window._needsLoading(html)) {
+    if (!window._morphReady) {
+      window._pending = html;
+      window._trace('set_content_buffered', { htmlLength: typeof html === 'string' ? html.length : 0 });
+      return;
+    }
+    var needsLoading = window._needsLoading(html);
+    window._trace('set_content', {
+      htmlLength: typeof html === 'string' ? html.length : 0,
+      needsLoading: needsLoading,
+      hasCanvas: /<canvas[\s>]/i.test(html || ''),
+      hasScripts: /<script[\s>]/i.test(html || '')
+    });
+    if (needsLoading) {
       window._scheduleLoading('Streaming widget structure…');
     } else if (window.__PI_GENERATIVE_UI_STREAMING_METRICS__.scriptRuns === 0) {
       window._hideLoading();
@@ -113,11 +266,35 @@ ${SVG_STYLES}
         return node;
       }
     });
+    requestAnimationFrame(function() {
+      window._snapshotDom('after_set_content');
+    });
+  };
+  window._setContentAndStageScripts = function(html, delayMs) {
+    var delay = typeof delayMs === 'number' ? delayMs : 0;
+    window._trace('stage_scripts_requested', { delayMs: delay, htmlLength: typeof html === 'string' ? html.length : 0 });
+    window._setContent(html);
+    var run = function() {
+      window._trace('stage_scripts_running');
+      window._runScripts();
+    };
+    var schedule = function() {
+      requestAnimationFrame(function() {
+        requestAnimationFrame(run);
+      });
+    };
+    if (delay > 0) {
+      setTimeout(schedule, delay);
+      return;
+    }
+    schedule();
   };
   window._runScripts = function() {
     window.__PI_GENERATIVE_UI_STREAMING_METRICS__.scriptRuns += 1;
     var scripts = Array.from(document.querySelectorAll('#root script'));
+    window._trace('run_scripts_start', { count: scripts.length });
     if (!scripts.length) {
+      window._trace('run_scripts_complete', { count: 0 });
       window._hideLoading();
       return;
     }
@@ -127,7 +304,9 @@ ${SVG_STYLES}
     function complete() {
       if (finished) return;
       finished = true;
+      window._trace('run_scripts_complete', { pending: pending });
       requestAnimationFrame(function() {
+        window._snapshotDom('after_run_scripts');
         requestAnimationFrame(function() {
           window._hideLoading();
         });
@@ -136,23 +315,27 @@ ${SVG_STYLES}
     function checkDone() {
       if (pending === 0) complete();
     }
-    scripts.forEach(function(old) {
+    scripts.forEach(function(old, index) {
       var s = document.createElement('script');
       Array.from(old.attributes).forEach(function(attr) {
         s.setAttribute(attr.name, attr.value);
       });
       if (old.src) {
         pending += 1;
+        window._trace('external_script_requested', { index: index, src: old.src });
         s.addEventListener('load', function() {
           pending -= 1;
+          window._trace('external_script_loaded', { index: index, src: old.src });
           checkDone();
         });
         s.addEventListener('error', function() {
           pending -= 1;
+          window._trace('external_script_failed', { index: index, src: old.src });
           checkDone();
         });
       } else {
         s.textContent = old.textContent;
+        window._trace('inline_script_replaced', { index: index, length: old.textContent ? old.textContent.length : 0 });
       }
       old.parentNode.replaceChild(s, old);
     });
@@ -161,7 +344,7 @@ ${SVG_STYLES}
 </script>
 ${widgetBridgeScript()}
 <script src="https://cdn.jsdelivr.net/npm/morphdom@2.7.4/dist/morphdom-umd.min.js"
-  onload="window._morphReady=true;if(window._pending){window._setContent(window._pending);window._pending=null;}"></script>
+  onload="window._morphReady=true;window._trace('morphdom_ready');if(window._pending){window._setContent(window._pending);window._pending=null;}"></script>
 </body></html>`;
 }
 
@@ -196,7 +379,7 @@ export default function (pi: ExtensionAPI) {
   let activeWindows: WidgetWindow[] = [];
   let activeWidgetRuns: Array<() => void> = [];
 
-  interface StreamingWidget {
+  interface StreamingWidget extends WidgetTraceCarrier {
     contentIndex: number;
     window: WidgetWindow | null;
     lastHTML: string;
@@ -207,6 +390,8 @@ export default function (pi: ExtensionAPI) {
     opening: Promise<WidgetWindow> | null;
     placeholderApplied: boolean;
     delayedFinalPending: boolean;
+    sawToolCallDelta: boolean;
+    lastWindowTitle: string | null;
     title: string;
     width: number;
     height: number;
@@ -236,6 +421,28 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
+  function getWindowTitle(title: string, phase: WidgetTerminalPhase | "placeholder") {
+    const normalized = normalizeWidgetTitle(title);
+    if (phase === "placeholder") return "Generating UI…";
+    if (phase === "preparing" || phase === "generating" || phase === "opening") {
+      return `${normalized} · Generating UI…`;
+    }
+    return normalized;
+  }
+
+  function syncWindowTitle(streamState: StreamingWidget, phase: WidgetTerminalPhase | "placeholder") {
+    if (!streamState.window || typeof streamState.window.show !== "function") return;
+    const title = getWindowTitle(streamState.title, phase);
+    if (streamState.lastWindowTitle === title) return;
+    try {
+      streamState.window.show({ title });
+      streamState.lastWindowTitle = title;
+      pushTrace(streamState, "host", "window_title_updated", { title, phase });
+    } catch (error) {
+      pushTrace(streamState, "host", "window_title_update_failed", error);
+    }
+  }
+
   function clearWidgetTerminalStatus() {
     widgetTerminalStatus = null;
   }
@@ -253,8 +460,12 @@ export default function (pi: ExtensionAPI) {
   function sendStreamingContent(streamState: StreamingWidget, html: string, runScripts = false) {
     if (!streamState.window || !streamState.ready) return false;
     const escaped = escapeJS(html);
+    pushTrace(streamState, "host", runScripts ? "send_final_content" : "send_streaming_content", {
+      htmlLength: html.length,
+      runScripts,
+    });
     streamState.window.send(runScripts
-      ? `window._setContent('${escaped}'); window._runScripts();`
+      ? `window._setContentAndStageScripts('${escaped}', ${SCRIPT_STAGE_DELAY_MS});`
       : `window._setContent('${escaped}')`
     );
     if (runScripts) {
@@ -266,19 +477,23 @@ export default function (pi: ExtensionAPI) {
 
   function flushStreamingContent(streamState: StreamingWidget) {
     if (streamState.finalHTML && !streamState.finalApplied) {
+      pushTrace(streamState, "host", "flush_final_content", { htmlLength: streamState.finalHTML.length });
       return sendStreamingContent(streamState, streamState.finalHTML, true);
     }
     if (!streamState.finalHTML && streamState.lastHTML) {
+      pushTrace(streamState, "host", "flush_partial_content", { htmlLength: streamState.lastHTML.length });
       return sendStreamingContent(streamState, streamState.lastHTML, false);
     }
+    pushTrace(streamState, "host", "flush_skipped", {
+      hasFinalHTML: !!streamState.finalHTML,
+      hasLastHTML: !!streamState.lastHTML,
+      finalApplied: streamState.finalApplied,
+    });
     return false;
   }
 
   function streamingPlaceholderHTML() {
-    return `<div style="display:grid;gap:0.75rem;min-height:220px;align-content:start">
-<div style="font-size:0.95rem;opacity:0.7;letter-spacing:0.08em;text-transform:uppercase">Generating widget</div>
-<div style="padding:1rem 1.1rem;border-radius:16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08)">Streaming content into the native window…</div>
-</div>`;
+    return `<div style="padding:0.35rem 0 0.25rem;color:rgba(255,255,255,.7);font-size:.92rem">Generating UI…</div>`;
   }
 
   function applyStreamingPlaceholder(streamState: StreamingWidget, force = false) {
@@ -286,30 +501,40 @@ export default function (pi: ExtensionAPI) {
     if (!force && (streamState.lastHTML || streamState.finalHTML)) return false;
     if (sendStreamingContent(streamState, streamingPlaceholderHTML())) {
       streamState.placeholderApplied = true;
+      pushTrace(streamState, "host", "placeholder_applied", { force });
       return true;
     }
+    pushTrace(streamState, "host", "placeholder_skipped", {
+      force,
+      hasLastHTML: !!streamState.lastHTML,
+      hasFinalHTML: !!streamState.finalHTML,
+      finalApplied: streamState.finalApplied,
+    });
     return false;
   }
 
   function attachStreamingReadyHandler(streamState: StreamingWidget, win: WidgetWindow) {
     win.on("ready", () => {
       if (streaming !== streamState) {
+        pushTrace(streamState, "host", "window_ready_stale");
         try { win.close(); } catch {}
         return;
       }
       streamState.ready = true;
+      pushTrace(streamState, "host", "window_ready");
       setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "generating");
+      syncWindowTitle(streamState, streamState.sawToolCallDelta ? "generating" : "placeholder");
 
-      const shouldForcePlaceholder = !!streamState.finalHTML
-        && streamState.lastHTML === streamState.finalHTML
-        && !streamState.finalApplied;
-      if (applyStreamingPlaceholder(streamState, shouldForcePlaceholder)) {
-        if (shouldForcePlaceholder) {
+      const shouldDelayFinal = !!streamState.finalHTML && !streamState.sawToolCallDelta && !streamState.finalApplied;
+      if (applyStreamingPlaceholder(streamState, shouldDelayFinal)) {
+        if (shouldDelayFinal) {
           streamState.delayedFinalPending = true;
+          pushTrace(streamState, "host", "delay_final_after_placeholder", { delayMs: MIN_PLACEHOLDER_VISIBLE_MS });
           setTimeout(() => {
             streamState.delayedFinalPending = false;
+            pushTrace(streamState, "host", "delayed_final_released");
             flushStreamingContent(streamState);
-          }, 50);
+          }, MIN_PLACEHOLDER_VISIBLE_MS);
           return;
         }
       }
@@ -322,14 +547,22 @@ export default function (pi: ExtensionAPI) {
     if (streamState.window) return streamState.window;
     if (!streamState.opening) {
       setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "opening");
+      pushTrace(streamState, "host", "open_window_start", {
+        title: streamState.title,
+        width: streamState.width,
+        height: streamState.height,
+        floating: streamState.floating,
+      });
       streamState.opening = (async () => {
         const win = await openWidgetWindow(shellHTML(), {
-          title: streamState.title,
+          title: getWindowTitle(streamState.title, "placeholder"),
           width: streamState.width,
           height: streamState.height,
           floating: streamState.floating,
         });
+        pushTrace(streamState, "host", "open_window_resolved");
         if (streaming !== streamState) {
+          pushTrace(streamState, "host", "open_window_stale");
           try { win.close(); } catch {}
           throw new Error("Stale streaming window.");
         }
@@ -344,6 +577,7 @@ export default function (pi: ExtensionAPI) {
         return win;
       } catch (error) {
         streamState.opening = null;
+        pushTrace(streamState, "host", "open_window_failed", error);
         throw error;
       }
     }
@@ -352,11 +586,13 @@ export default function (pi: ExtensionAPI) {
 
   async function waitForStreamingReady(streamState: StreamingWidget, win: WidgetWindow) {
     if (streamState.ready) return;
+    pushTrace(streamState, "host", "wait_for_streaming_ready_start");
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       const finish = () => {
         if (settled) return;
         settled = true;
+        pushTrace(streamState, "host", "wait_for_streaming_ready_done");
         resolve();
       };
       win.on("ready", finish);
@@ -375,8 +611,13 @@ export default function (pi: ExtensionAPI) {
 
   function queueStreamingOpen(streamState: StreamingWidget) {
     if (streamState.updateTimer) return;
+    pushTrace(streamState, "host", "queue_streaming_open", { delayMs: 150 });
     streamState.updateTimer = setTimeout(async () => {
       streamState.updateTimer = null;
+      pushTrace(streamState, "host", "queue_streaming_open_fired", {
+        hasWindow: !!streamState.window,
+        ready: streamState.ready,
+      });
 
       try {
         if (!streamState.window && !streamState.opening) {
@@ -388,7 +629,9 @@ export default function (pi: ExtensionAPI) {
           applyStreamingPlaceholder(streamState);
           flushStreamingContent(streamState);
         }
-      } catch {}
+      } catch (error) {
+        pushTrace(streamState, "host", "queue_streaming_open_failed", error);
+      }
     }, 150);
   }
 
@@ -483,6 +726,8 @@ export default function (pi: ExtensionAPI) {
       if (block?.type === "toolCall" && block?.name === "show_widget") {
         const args = block.arguments ?? {};
         const streamState: StreamingWidget = {
+          traceStartedAt: Date.now(),
+          debugTrace: [],
           contentIndex: raw.contentIndex,
           window: null,
           lastHTML: "",
@@ -493,14 +738,26 @@ export default function (pi: ExtensionAPI) {
           opening: null,
           placeholderApplied: false,
           delayedFinalPending: false,
+          sawToolCallDelta: false,
+          lastWindowTitle: null,
           title: normalizeWidgetTitle(args.title ?? "Widget"),
           width: args.width ?? 800,
           height: args.height ?? 600,
           floating: args.floating ?? false,
         };
+        pushTrace(streamState, "host", "toolcall_start", {
+          contentIndex: raw.contentIndex,
+          title: streamState.title,
+          width: streamState.width,
+          height: streamState.height,
+          floating: streamState.floating,
+        });
         streaming = streamState;
         setWidgetTerminalStatus(streamState.title, streamState.width, streamState.height, "preparing");
-        queueStreamingOpen(streamState);
+        pushTrace(streamState, "host", "eager_open_requested");
+        startStreamingOpen(streamState).catch((error) => {
+          pushTrace(streamState, "host", "eager_open_failed", error);
+        });
       }
       return;
     }
@@ -512,12 +769,20 @@ export default function (pi: ExtensionAPI) {
       const html = args.widget_code;
       if (!html || html.length < 20 || html === streaming.lastHTML) return;
 
+      streaming.sawToolCallDelta = true;
       streaming.lastHTML = html;
       streaming.title = normalizeWidgetTitle(args.title ?? streaming.title ?? "Widget");
       streaming.width = args.width ?? streaming.width;
       streaming.height = args.height ?? streaming.height;
       streaming.floating = args.floating ?? streaming.floating;
+      pushTrace(streaming, "host", "toolcall_delta", {
+        htmlLength: html.length,
+        title: streaming.title,
+        width: streaming.width,
+        height: streaming.height,
+      });
       setWidgetTerminalStatus(streaming.title, streaming.width, streaming.height, "generating");
+      syncWindowTitle(streaming, "generating");
       queueStreamingOpen(streaming);
       return;
     }
@@ -530,7 +795,13 @@ export default function (pi: ExtensionAPI) {
 
       const toolCall = raw.toolCall;
       if (toolCall?.arguments?.widget_code) {
-        streaming.finalHTML = toolCall.arguments.widget_code;
+        const finalHTML = toolCall.arguments.widget_code;
+        streaming.finalHTML = finalHTML;
+        pushTrace(streaming, "host", "toolcall_end", {
+          htmlLength: finalHTML.length,
+          sawToolCallDelta: streaming.sawToolCallDelta,
+        });
+        syncWindowTitle(streaming, "ready");
         if (!streaming.window && !streaming.opening) {
           queueStreamingOpen(streaming);
         }
@@ -643,6 +914,19 @@ export default function (pi: ExtensionAPI) {
       const height = params.height ?? 600;
       let win: WidgetWindow | null = null;
 
+      const streamState = streaming;
+      const traceCarrier: WidgetTraceCarrier = streamState ?? {
+        traceStartedAt: Date.now(),
+        debugTrace: [],
+      };
+      pushTrace(traceCarrier, "host", "execute_start", {
+        title,
+        width,
+        height,
+        isSVG,
+        hasStreamingState: !!streamState,
+      });
+
       const emitPartialStatus = (phase: "opening" | "ready") => {
         onUpdate?.({
           content: [{
@@ -661,8 +945,12 @@ export default function (pi: ExtensionAPI) {
         });
       };
 
-      const streamState = streaming;
       if (streamState) {
+        pushTrace(traceCarrier, "host", "execute_attach_streaming_state", {
+          sawToolCallDelta: streamState.sawToolCallDelta,
+          hasFinalHTML: !!streamState.finalHTML,
+          hasWindow: !!streamState.window,
+        });
         if (streamState.updateTimer) {
           clearTimeout(streamState.updateTimer);
           streamState.updateTimer = null;
@@ -671,6 +959,7 @@ export default function (pi: ExtensionAPI) {
         win = streamState.window ?? await startStreamingOpen(streamState);
         await waitForStreamingReady(streamState, win);
         streamState.window = win;
+        syncWindowTitle(streamState, streamState.delayedFinalPending ? "generating" : "ready");
         if (!streamState.delayedFinalPending) {
           flushStreamingContent(streamState);
         }
@@ -680,14 +969,31 @@ export default function (pi: ExtensionAPI) {
       } else {
         setWidgetTerminalStatus(title, width, height, "opening");
         emitPartialStatus("opening");
+        pushTrace(traceCarrier, "host", "nonstream_open_start", {
+          width,
+          height,
+          floating: params.floating ?? false,
+        });
         win = await openWidgetWindow(shellHTML(), {
           width,
           height,
           title,
           floating: params.floating ?? false,
         });
+        pushTrace(traceCarrier, "host", "nonstream_open_resolved");
         await waitForWindowReady(win);
-        win.send(`window._setContent('${escapeJS(nonStreamingContent(code, isSVG))}'); window._runScripts();`);
+        if (typeof win.show === "function") {
+          try { win.show({ title: `${title} · Generating UI…` }); } catch {}
+        }
+        pushTrace(traceCarrier, "host", "nonstream_window_ready");
+        win.send(`window._setContent('${escapeJS(streamingPlaceholderHTML())}')`);
+        pushTrace(traceCarrier, "host", "nonstream_placeholder_sent", { delayMs: MIN_PLACEHOLDER_VISIBLE_MS });
+        await new Promise((resolve) => setTimeout(resolve, MIN_PLACEHOLDER_VISIBLE_MS));
+        win.send(`window._setContentAndStageScripts('${escapeJS(nonStreamingContent(code, isSVG))}', ${SCRIPT_STAGE_DELAY_MS});`);
+        if (typeof win.show === "function") {
+          try { win.show({ title }); } catch {}
+        }
+        pushTrace(traceCarrier, "host", "nonstream_final_staged", { htmlLength: code.length });
         setWidgetTerminalStatus(title, width, height, "ready");
         emitPartialStatus("ready");
       }
@@ -703,17 +1009,24 @@ export default function (pi: ExtensionAPI) {
         let followUpReplyMode: "followUp" | "steer" | null = null;
         let resolved = false;
         const abortRun = () => {
+          pushTrace(traceCarrier, "host", "abort_requested");
           try { win?.close(); } catch {}
           finish("Aborted.");
         };
         activeWidgetRuns.push(abortRun);
         const timeout = setTimeout(() => {
+          pushTrace(traceCarrier, "host", "interaction_timeout");
           finish("Widget still open (timed out waiting for interaction).");
         }, 120_000);
 
         const finish = (reason: string) => {
           if (resolved) return;
           resolved = true;
+          pushTrace(traceCarrier, "host", "finish", {
+            reason,
+            hasMessageData: messageData !== null,
+            hasFollowUpPrompt: !!followUpPrompt,
+          });
           clearTimeout(timeout);
           activeWidgetRuns = activeWidgetRuns.filter((run) => run !== abortRun);
           clearWidgetTerminalStatus();
@@ -738,12 +1051,20 @@ export default function (pi: ExtensionAPI) {
               followUpPrompt,
               followUpReplyMode,
               closedReason: reason,
+              debugTrace: traceCarrier.debugTrace,
             },
           });
         };
 
         win.on("message", async (data: unknown) => {
+          const traceMessage = extractWidgetTraceMessage(data);
+          if (traceMessage) {
+            pushTrace(traceCarrier, "widget", traceMessage.phase, traceMessage.data);
+            return;
+          }
+
           messageData = data;
+          pushTrace(traceCarrier, "widget", "message", data);
           const promptMessage = extractFollowUpPromptMessage(data);
           if (promptMessage) {
             followUpPrompt = promptMessage.prompt;
@@ -753,6 +1074,7 @@ export default function (pi: ExtensionAPI) {
               finish(`Queued follow-up prompt (${followUpReplyMode}).`);
             } catch (error) {
               clearWidgetTerminalStatus();
+              pushTrace(traceCarrier, "host", "follow_up_failed", error);
               reject(error instanceof Error ? error : new Error(String(error)));
             }
             return;
@@ -761,11 +1083,13 @@ export default function (pi: ExtensionAPI) {
         });
 
         win.on("closed", () => {
+          pushTrace(traceCarrier, "host", "window_closed");
           finish("Window closed by user.");
         });
 
         win.on("error", (err: unknown) => {
           clearWidgetTerminalStatus();
+          pushTrace(traceCarrier, "host", "window_error", err);
           reject(err instanceof Error ? err : new Error(String(err)));
         });
 
@@ -832,6 +1156,16 @@ export default function (pi: ExtensionAPI) {
           ? JSON.stringify(details.messageData, null, 2)
           : JSON.stringify(details.messageData);
         text += "\n" + theme.fg("dim", `  Data: ${messageText}`);
+      }
+      if (expanded && Array.isArray(details.debugTrace) && details.debugTrace.length) {
+        const traceText = details.debugTrace
+          .slice(-12)
+          .map((entry: any) => {
+            const dataText = entry?.data === undefined ? "" : ` ${JSON.stringify(entry.data)}`;
+            return `[${entry?.elapsedMs ?? "?"}ms] ${entry?.source ?? "?"}:${entry?.phase ?? "?"}${dataText}`;
+          })
+          .join("\n");
+        text += "\n" + theme.fg("dim", `  Trace:\n  ${traceText.replace(/\n/g, "\n  ")}`);
       }
 
       return new Text(text, 0, 0);

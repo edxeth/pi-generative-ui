@@ -29,6 +29,7 @@ export interface BackendSupportError {
 export interface WidgetWindow {
   on(event: WidgetWindowEvent, handler: (...args: unknown[]) => void): void;
   send(js: string): void;
+  show?(options?: { title?: string }): void;
   close(): void;
 }
 

@@ -104,18 +104,24 @@ Use \`imagine_svg\`. Same technical rules (viewBox, safe area) but the aesthetic
 
 const CHARTS_CHART_JS = `## Charts (Chart.js)
 \`\`\`html
+<div id="summary" style="font-size: 14px; color: var(--color-text-secondary); margin-bottom: 8px;"></div>
 <div style="position: relative; width: 100%; height: 300px;">
   <canvas id="myChart"></canvas>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" onload="initChart()"></script>
 <script>
+  function bootBase() {
+    document.getElementById('summary').textContent = 'Revenue by quarter';
+  }
   function initChart() {
+    if (!window.Chart) return;
     new Chart(document.getElementById('myChart'), {
       type: 'bar',
       data: { labels: ['Q1','Q2','Q3','Q4'], datasets: [{ label: 'Revenue', data: [12,19,8,15] }] },
       options: { responsive: true, maintainAspectRatio: false }
     });
   }
+  bootBase();
   if (window.Chart) initChart();
 </script>
 \`\`\`
@@ -127,6 +133,8 @@ const CHARTS_CHART_JS = `## Charts (Chart.js)
 - For horizontal bar charts: wrapper div height should be at least (number_of_bars * 40) + 80 pixels.
 - Load UMD build via \`<script src="https://cdnjs.cloudflare.com/ajax/libs/...">\` — sets \`window.Chart\` global. Follow with plain \`<script>\` (no \`type="module"\`).
 - **Script load ordering**: CDN scripts may not be loaded when the next \`<script>\` runs (especially during streaming). Always use \`onload="initChart()"\` on the CDN script tag, define your chart init in a named function, and add \`if (window.Chart) initChart();\` as a fallback at the end of your inline script. This guarantees charts render regardless of load order.
+- **Base UI first, charts second**: controls, metrics, labels, and non-chart calculations must initialize in local JS without waiting for Chart.js. Split startup into \`bootBase()\` and \`initChart()\` so a CDN miss does not leave the whole widget blank.
+- **Graceful chart failure**: if Chart.js never loads, keep the widget functional and leave the canvas area empty or with a tiny note — never gate the whole app on the chart library.
 - Multiple charts: use unique IDs (\`myChart1\`, \`myChart2\`). Each gets its own canvas+div pair.
 - For bubble and scatter charts: bubble radii extend past their center points, so points near axis boundaries get clipped. Pad the scale range — set \`scales.y.min\` and \`scales.y.max\` ~10% beyond your data range (same for x). Or use \`layout: { padding: 20 }\` as a blunt fallback.
 - Chart.js auto-skips x-axis labels when they'd overlap. If you have ≤12 categories and need all labels visible (waterfall, monthly series), set \`scales.x.ticks: { autoSkip: false, maxRotation: 45 }\` — missing labels make bars unidentifiable.

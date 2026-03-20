@@ -115,6 +115,22 @@ What you should see:
 - the slider updates live
 - clicking the button returns data into pi
 
+## Debugging startup and rendering
+
+Enable structured startup traces in the tool result details:
+
+```bash
+PI_GENERATIVE_UI_DEBUG=1 pi --no-extensions -e /absolute/path/to/pi-generative-ui
+```
+
+If you also want live raw trace lines printed into the terminal stderr stream, add:
+
+```bash
+PI_GENERATIVE_UI_DEBUG=1 PI_GENERATIVE_UI_DEBUG_STDERR=1 pi --no-extensions -e /absolute/path/to/pi-generative-ui
+```
+
+`debugTrace` in the `show_widget` result details makes it easy to tell whether a run used streamed tool-call deltas or the staged non-streaming fallback, when the window became ready, and whether external scripts loaded or failed.
+
 ## Architecture
 
 This repo is intentionally small.
@@ -132,6 +148,7 @@ Linux and macOS both go through upstream Glimpse.
 
 ## Known rough edges
 
+- Streaming fidelity depends on the model/provider emitting partial `show_widget` tool-call argument deltas. When that does not happen, the extension falls back to a staged placeholder-first render instead of token-perfect element-by-element growth.
 - Linux stderr noise from GTK/Mesa can still appear in the pi terminal on some setups because it comes from upstream Glimpse/WebKitGTK, not from widget code.
 - The verified Linux story is strong on WSL2 Ubuntu 24 + WSLg; other Linux environments are best-effort unless separately validated.
 
